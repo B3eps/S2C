@@ -1,0 +1,151 @@
+export type TF = '1m' | '5m' | '15m' | '1h' | '4h';
+export const TFS: TF[] = ['1m', '5m', '15m', '1h', '4h'];
+export const TF_MS: Record<TF, number> = {
+  '1m': 60_000,
+  '5m': 300_000,
+  '15m': 900_000,
+  '1h': 3_600_000,
+  '4h': 14_400_000,
+};
+export const TF_LABEL: Record<TF, string> = { '1m': '1d', '5m': '5d', '15m': '15d', '1h': '1s', '4h': '4s' };
+
+export interface Bar {
+  t: number; // open time, ms UTC
+  o: number;
+  h: number;
+  l: number;
+  c: number;
+  v: number;
+}
+
+export type Side = 'long' | 'short';
+export type OrderType = 'market' | 'limit' | 'stop';
+
+export interface Order {
+  id: string;
+  side: Side;
+  type: Exclude<OrderType, 'market'>;
+  price: number;
+  sl?: number;
+  tp?: number;
+  lots: number;
+  createdAt: number;
+}
+
+export interface Position {
+  id: string;
+  side: Side;
+  lots: number;
+  entry: number;
+  sl?: number;
+  tp?: number;
+  initialSl?: number;
+  openedAt: number; // replay ms
+  orderType: OrderType;
+  shotOpen?: string;
+}
+
+export type CloseReason = 'tp' | 'sl' | 'manual' | 'session' | 'violation';
+
+export interface Trade {
+  id: string;
+  accountId: string;
+  sessionId: string;
+  side: Side;
+  lots: number;
+  entry: number;
+  exit: number;
+  sl?: number;
+  tp?: number;
+  initialSl?: number;
+  openedAt: number;
+  closedAt: number;
+  pnl: number;
+  r?: number;
+  reason: CloseReason;
+  orderType: OrderType;
+  tf: TF;
+  note: string;
+  shotOpen?: string;
+  shotClose?: string;
+  realClosedAt: number; // wall clock
+}
+
+export interface Rules {
+  target: number; // % profit target (challenge)
+  dailyLoss: number; // % of size
+  maxLoss: number; // % of size
+  minDays: number;
+  split: number; // % trader share
+  payoutMin: number; // % profit needed to request payout
+}
+
+export interface Payout {
+  id: string;
+  accountId: string;
+  gross: number;
+  amount: number;
+  at: number;
+}
+
+export type Phase = 'challenge' | 'funded';
+export type AccountStatus = 'active' | 'violated';
+
+export interface Account {
+  id: string;
+  no: string;
+  size: number;
+  phase: Phase;
+  status: AccountStatus;
+  createdAt: number;
+  fundedAt?: number;
+  violatedAt?: number;
+  violation?: string;
+  balance: number;
+  rules: Rules;
+  tradingDays: string[];
+  payouts: Payout[];
+}
+
+export type DrawingKind = 'trend' | 'hline' | 'rect';
+export interface Drawing {
+  id: string;
+  kind: DrawingKind;
+  a: { t: number; p: number };
+  b: { t: number; p: number };
+}
+
+export interface SessionRec {
+  id: string;
+  accountId: string;
+  startMs: number;
+  clockMs: number;
+  startedAt: number;
+  endedAt?: number;
+  orders: Order[];
+  positions: Position[];
+  drawings: Drawing[];
+  dayStartEquity: number;
+  dayKey: string;
+  firstPrice?: number;
+  lastPrice?: number;
+  high?: number;
+  low?: number;
+}
+
+export const DEFAULT_RULES: Rules = {
+  target: 8,
+  dailyLoss: 5,
+  maxLoss: 10,
+  minDays: 3,
+  split: 80,
+  payoutMin: 1,
+};
+
+export const PACKAGES = [5_000, 10_000, 25_000, 50_000, 100_000];
+
+/** cTrader XAUUSD contract: 1 lot = 100 oz */
+export const CONTRACT = 100;
+export const MIN_LOT = 0.01;
+
+export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);

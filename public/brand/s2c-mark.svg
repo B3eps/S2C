@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+  <defs><mask id="cut" maskUnits="userSpaceOnUse"><rect x="-10" y="-30" width="110" height="100" fill="#fff"/><path d="M8 32.5L76 7" stroke="#000" stroke-width="1.8"/></mask></defs>
+  <rect width="96" height="96" rx="10" fill="#181715"/>
+  <g transform="translate(6 28)" mask="url(#cut)" fill="none" stroke="#d9b25c"><path d="M6 1H78L83 6V34L78 39H6L1 34V6Z" stroke-width="2"/><path d="M27.6 11.6H17.6L13.6 15.6V16.6L17 20H22L25.4 23.4V24.4L21.4 28.4H11.4M33 11.6H43.4L47.4 15.6V18.6L35.8 28.4H50.2M72.2 11.6H61.6L57.6 15.6V24.4L61.6 28.4H72.2" stroke-width="5.6" stroke-linejoin="miter" stroke-miterlimit="8"/></g>
+</svg>

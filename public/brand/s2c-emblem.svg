@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 84 40" width="840" height="400">
+  <title>S2C</title>
+  <defs><mask id="cut" maskUnits="userSpaceOnUse"><rect x="-2" y="-2" width="88" height="44" fill="#fff"/><path d="M8 32.5L76 7" stroke="#000" stroke-width="1.6"/></mask></defs>
+  
+  <g mask="url(#cut)" fill="none" stroke="#d9b25c"><path d="M6 1H78L83 6V34L78 39H6L1 34V6Z" stroke-width="1.6"/><path d="M27.6 11.6H17.6L13.6 15.6V16.6L17 20H22L25.4 23.4V24.4L21.4 28.4H11.4M33 11.6H43.4L47.4 15.6V18.6L35.8 28.4H50.2M72.2 11.6H61.6L57.6 15.6V24.4L61.6 28.4H72.2" stroke-width="5.2" stroke-linejoin="miter" stroke-miterlimit="8"/></g>
+</svg>

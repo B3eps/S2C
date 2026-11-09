@@ -1,0 +1,77 @@
+:root {
+  /* smoked acrylic plies, warm graphite tinted from the gold hue */
+  --ply-0: #121110;
+  --ply-1: #181715;
+  --ply-2: #201e1b;
+  --ply-3: #2a2824;
+  --rule: #2e2b27;
+  --rule-strong: #3d3a34;
+
+  --ink-1: #ece7dd;
+  --ink-2: #a9a397;
+  --ink-3: #858075;
+
+  /* gold foil: certification and the primary action only */
+  --gold: #d9b25c;
+  --gold-strong: #e8c46e;
+  --gold-deep: #9c7a2e;
+  --gold-ink: #1d1609;
+  --gold-wash: rgba(217, 178, 92, 0.1);
+
+  /* label stock */
+  --label: #ede6d3;
+  --label-2: #e3dac3;
+  --label-ink: #1c1a16;
+  --label-ink-2: #5a5448;
+  --label-rule: #cbc1a6;
+
+  /* direction, matched lightness */
+  --up: #43c29e;
+  --up-wash: rgba(67, 194, 158, 0.12);
+  --down: #ec7363;
+  --down-wash: rgba(236, 115, 99, 0.12);
+  --warn: #f0a24b;
+  --warn-wash: rgba(240, 162, 75, 0.12);
+  --stamp: #c4412f;
+
+  --font: 'Archivo Variable', 'Segoe UI', system-ui, sans-serif;
+  --narrow: 76%;
+  --wide: 118%;
+
+  --t-11: 0.6875rem;
+  --t-12: 0.75rem;
+  --t-13: 0.8125rem;
+  --t-14: 0.875rem;
+  --t-16: 1rem;
+  --t-18: 1.125rem;
+  --t-22: 1.375rem;
+  --t-28: 1.75rem;
+  --t-40: 2.5rem;
+
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+
+  --r-1: 2px;
+  --r-2: 3px;
+  --r-3: 4px;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.25);
+  --shadow-2: 0 2px 4px rgba(0, 0, 0, 0.45), 0 16px 40px rgba(0, 0, 0, 0.45);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --d-1: 140ms;
+  --d-2: 220ms;
+  --d-3: 420ms;
+
+  /* the security strip that only funded labels carry */
+  --holo: conic-gradient(from var(--holo-angle, 0deg), #e9d6a0, #b7e3d4, #c9c2f0, #f0c6d6, #e9e0a8, #b9dcf0, #e9d6a0);
+
+  color-scheme: dark;
+}
