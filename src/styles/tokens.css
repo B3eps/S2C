@@ -1,15 +1,15 @@
 :root {
   /* smoked acrylic plies, warm graphite tinted from the gold hue */
-  --ply-0: #121110;
-  --ply-1: #181715;
-  --ply-2: #201e1b;
-  --ply-3: #2a2824;
-  --rule: #2e2b27;
-  --rule-strong: #3d3a34;
+  --ply-0: #1a1816;
+  --ply-1: #201e1b;
+  --ply-2: #292622;
+  --ply-3: #34302b;
+  --rule: #37332e;
+  --rule-strong: #48433c;
 
   --ink-1: #ece7dd;
   --ink-2: #a9a397;
-  --ink-3: #858075;
+  --ink-3: #938c80;
 
   /* gold foil: certification and the primary action only */
   --gold: #d9b25c;

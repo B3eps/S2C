@@ -51,13 +51,17 @@ export async function fetchRange(interval: TF, from: number, to: number): Promis
   return out.filter((b) => !isClosed(b.t));
 }
 
-/** Uniform random minute between Mar 2021 and two weeks ago, inside trading hours. */
+/**
+ * Random minute from 2024 onward (PAXG trades thinly on Binance before that, which shows up as
+ * flat candles), starting between 06:00 and 19:00 UTC so a session opens into liquid hours.
+ */
 export function randomStart(): number {
-  const lo = Date.UTC(2023, 0, 1); // PAXG liquidity on Binance is thin before 2023
+  const lo = Date.UTC(2024, 0, 1);
   const hi = Date.now() - 14 * 86_400_000;
   for (;;) {
     const t = Math.floor((lo + Math.random() * (hi - lo)) / MIN) * MIN;
-    if (!isClosed(t) && !isClosed(t - 6 * 3_600_000)) return t;
+    const h = new Date(t).getUTCHours();
+    if (h >= 6 && h < 19 && !isClosed(t) && !isClosed(t - 6 * 3_600_000)) return t;
   }
 }
 

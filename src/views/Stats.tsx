@@ -20,7 +20,7 @@ export function Stats() {
     ['Net sonuç', signedMoney(s.net), s.net > 0 ? 'up' : s.net < 0 ? 'down' : ''],
     ['İşlem', String(s.count)],
     ['Kazanma oranı', s.count ? plainPct(s.winRate, 1) : '—'],
-    ['Profit factor', pf],
+    ['Kâr faktörü', pf],
     ['Ortalama R', rMult(s.avgR)],
     ['Toplam R', rMult(s.totalR)],
     ['Ortalama kazanç', s.wins ? money(s.avgWin) : '—', 'up'],

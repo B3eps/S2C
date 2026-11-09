@@ -14,7 +14,9 @@ export function NewAccount() {
         </button>
         <h1>Yeni değerlendirme hesabı</h1>
         <div className="ledger">
-          <span>Kuralları Ayarlar’dan değiştirebilirsin. Açılan hesap o anki kuralları saklar.</span>
+          <span>
+            Tüm paketlerde <b>{rules.minDays}</b> asgari gün · kâr payı <b>%{rules.split}</b> · ödeme eşiği <b>%{rules.payoutMin}</b>
+          </span>
         </div>
       </div>
       <div className="pkg-list">
@@ -51,21 +53,11 @@ export function NewAccount() {
                     <span>
                       <b>{money0((size * rules.maxLoss) / 100)}</b>toplam limit %{rules.maxLoss}
                     </span>
-                    <span>
-                      <b>{rules.minDays}</b>asgari gün
-                    </span>
-                    <span>
-                      <b>%{rules.split}</b>kâr payı
-                    </span>
-                    <span>
-                      <b>%{rules.payoutMin}</b>ödeme eşiği
-                    </span>
                   </div>
                 </div>
                 <div className="cert-grade">
-                  <span className="g-label">Aç</span>
                   <span className="g-value">{sizeLabel(a.size)}</span>
-                  <span className="g-sub">seans hemen başlar</span>
+                  <span className="g-sub">Hesabı aç</span>
                 </div>
               </div>
             </button>

@@ -13,7 +13,7 @@ const BAND: Record<string, string> = {
   asia: 'rgba(0,0,0,0)',
   london: alpha(C.gold, 0.035),
   overlap: alpha(C.gold, 0.06),
-  ny: alpha('#7fa7f0', 0.035),
+  ny: alpha('#8ea3a8', 0.045),
 };
 
 interface IndRuntime {

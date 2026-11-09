@@ -1,13 +1,13 @@
 /** Hex mirrors of the CSS tokens, for canvas (chart) drawing. Keep in sync with styles/tokens.css. */
 export const C = {
-  ply0: '#121110',
-  ply1: '#181715',
-  ply2: '#201e1b',
-  rule: '#2e2b27',
-  grid: '#1c1b18',
+  ply0: '#1a1816',
+  ply1: '#201e1b',
+  ply2: '#292622',
+  rule: '#37332e',
+  grid: '#24211e',
   ink1: '#ece7dd',
   ink2: '#a9a397',
-  ink3: '#858075',
+  ink3: '#938c80',
   gold: '#d9b25c',
   goldStrong: '#e8c46e',
   up: '#43c29e',
@@ -17,7 +17,8 @@ export const C = {
 };
 
 /** Indicator series palette: distinct from candles and from each other on the dark ground. */
-export const SERIES = ['#d9b25c', '#7fa7f0', '#c58bf0', '#5fd0d6', '#f08bb4', '#b9d36a', '#f0a24b', '#e6e1d6'];
+/** Drawn from the world: label ivory, amber, desaturated teal and coral, warm neutrals. No gold: gold certifies. */
+export const SERIES = ['#e6dfcf', '#f0a24b', '#6fb5a2', '#d98c80', '#c2a878', '#8ea3a8', '#b48fa0', '#a9a397'];
 
 export const alpha = (hex: string, a: number) => {
   const n = parseInt(hex.slice(1), 16);

@@ -207,7 +207,7 @@ export const useApp = create<State>((set, get) => {
   const shotJobs: { kind: 'open' | 'close'; posId?: string; tradeId?: string }[] = [];
   const runShots = () => {
     if (!shotJobs.length) return;
-    requestAnimationFrame(() =>
+    setTimeout(() =>
       requestAnimationFrame(async () => {
         const jobs = shotJobs.splice(0);
         for (const j of jobs) {
@@ -235,7 +235,7 @@ export const useApp = create<State>((set, get) => {
         }
         set({ trades: [...get().trades] });
       }),
-    );
+    180);
   };
 
   const account = () => {

@@ -81,7 +81,21 @@ export function CertLabel({ a, compact, className = '', stampAnim }: { a: Accoun
   const days = new Set(a.tradingDays).size;
   const paid = a.payouts.reduce((s, p) => s + p.amount, 0);
   return (
-    <div className={`cert ${funded ? 'funded' : ''} ${voidAcc ? 'void' : ''} ${compact ? 'compact' : ''} ${className}`}>
+    <div
+      className={`cert ${funded ? 'funded' : ''} ${voidAcc ? 'void' : ''} ${compact ? 'compact' : ''} ${className}`}
+      onPointerMove={
+        funded
+          ? (e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              const kx = (e.clientX - r.left) / r.width;
+              const ky = (e.clientY - r.top) / r.height;
+              e.currentTarget.style.setProperty('--holo-x', `${kx * 100}%`);
+              e.currentTarget.style.setProperty('--holo-px', `${kx * 100}%`);
+              e.currentTarget.style.setProperty('--holo-tilt', `${50 + ky * 40}deg`);
+            }
+          : undefined
+      }
+    >
       <div className="cert-main">
         {compact ? (
           <>
@@ -124,7 +138,7 @@ export function CertLabel({ a, compact, className = '', stampAnim }: { a: Accoun
         ) : funded ? (
           <>
             <span className="g-label">Sınıf</span>
-            <span className="g-value">FUNDED</span>
+            <span className="g-value">FONLU</span>
             {!compact && <span className="g-sub">{pct(growth, 2)}</span>}
           </>
         ) : (
@@ -174,7 +188,7 @@ export function EquityCurve({ points, height = 200 }: { points: { i: number; v: 
   const belowPeak = peakPts.join('') + `L${X(points.length - 1)} ${bottom}L${X(0)} ${bottom}Z`;
   const aboveCurve = d + `L${X(points.length - 1)} ${pad.t}L${X(0)} ${pad.t}Z`;
   const last = points[points.length - 1].v;
-  const col = last >= 0 ? C.gold : C.down;
+  const col = last >= 0 ? C.up : C.down;
   const hp = hover !== null ? points[hover] : null;
   return (
     <div
@@ -202,8 +216,15 @@ export function EquityCurve({ points, height = 200 }: { points: { i: number; v: 
           </>
         )}
         <text x={pad.l} y={height - 4} fill={C.ink3} fontSize={11}>
-          İşlem 1
+          0
         </text>
+        {[hi, 0, lo]
+          .filter((v, i, a) => a.indexOf(v) === i)
+          .map((v) => (
+            <text key={v} x={w - pad.r} y={Y(v) - 4} fill={C.ink3} fontSize={11} textAnchor="end">
+              {money(v)}
+            </text>
+          ))}
         <text x={w - pad.r} y={height - 4} fill={C.ink3} fontSize={11} textAnchor="end">
           {points.length - 1}
         </text>
@@ -222,13 +243,20 @@ function heatColor(v: number | undefined, metric: HeatMetric, max: number) {
   if (v === undefined) return undefined;
   if (metric === 'r') {
     const k = Math.min(1, Math.abs(v) / (max || 1));
-    return v >= 0 ? `rgba(217,178,92,${0.15 + k * 0.75})` : `rgba(236,115,99,${0.15 + k * 0.75})`;
+    return v >= 0 ? `rgba(67,194,158,${0.25 + k * 0.7})` : `rgba(236,115,99,${0.25 + k * 0.7})`;
   }
   if (metric === 'winrate') {
     const k = v / 100;
-    return k >= 0.5 ? `rgba(217,178,92,${0.15 + (k - 0.5) * 1.6})` : `rgba(236,115,99,${0.15 + (0.5 - k) * 1.4})`;
+    return k >= 0.5 ? `rgba(67,194,158,${0.25 + (k - 0.5) * 1.4})` : `rgba(236,115,99,${0.25 + (0.5 - k) * 1.4})`;
   }
-  return `rgba(217,178,92,${0.15 + Math.min(1, v / (max || 1)) * 0.75})`;
+  return `rgba(236,231,221,${0.2 + Math.min(1, v / (max || 1)) * 0.7})`;
+}
+
+/** One magnitude ramp: the cell's filled square grows with |value|, the same ramp as its tint. */
+function magnitude(v: number | undefined, metric: HeatMetric, max: number) {
+  if (v === undefined) return 0;
+  const k = metric === 'winrate' ? Math.abs(v - 50) / 50 : Math.min(1, Math.abs(v) / (max || 1));
+  return (0.35 + 0.65 * k).toFixed(3);
 }
 
 export function Heatmap({ trades }: { trades: Trade[] }) {
@@ -265,7 +293,7 @@ export function Heatmap({ trades }: { trades: Trade[] }) {
                 key={h}
                 className="cell"
                 data-v={c.value !== undefined ? '' : undefined}
-                style={{ background: heatColor(c.value, metric, max) }}
+                style={{ ['--m' as string]: magnitude(c.value, metric, max) }}
                 onMouseEnter={(e) =>
                   c.value !== undefined &&
                   setTip({
@@ -277,7 +305,9 @@ export function Heatmap({ trades }: { trades: Trade[] }) {
                   })
                 }
                 onMouseLeave={() => setTip(null)}
-              />
+              >
+                {c.value !== undefined && <i style={{ background: heatColor(c.value, metric, max) }} />}
+              </span>
             ))}
           </Row>
         ))}
@@ -288,7 +318,7 @@ export function Heatmap({ trades }: { trades: Trade[] }) {
           className="ramp"
           style={{
             background:
-              metric === 'count' ? 'linear-gradient(90deg, rgba(217,178,92,.15), rgba(217,178,92,.9))' : 'linear-gradient(90deg, rgba(236,115,99,.9), rgba(236,115,99,.15) 45%, rgba(217,178,92,.15) 55%, rgba(217,178,92,.9))',
+              metric === 'count' ? 'linear-gradient(90deg, rgba(236,231,221,.2), rgba(236,231,221,.9))' : 'linear-gradient(90deg, rgba(236,115,99,.95), rgba(236,115,99,.25) 45%, rgba(67,194,158,.25) 55%, rgba(67,194,158,.95))',
           }}
         />
         <span>{metric === 'count' ? 'Çok' : 'Güçlü'}</span>
