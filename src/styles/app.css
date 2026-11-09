@@ -1961,3 +1961,110 @@ table.tbl {
 .menu, .param-pop { z-index: 50; }
 
 .cert.compact .stamp { right: auto; left: 50%; font-size: var(--t-12); padding: 1px 6px; border-width: 1.5px; }
+
+/* ── corner session report ─────────────────────────────────────────────── */
+.notices {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 70;
+  display: grid;
+  gap: 12px;
+  width: 400px;
+}
+.notice {
+  animation: noticeIn 520ms var(--ease-out) both;
+  transform-origin: right bottom;
+}
+@keyframes noticeIn {
+  from {
+    transform: translateX(32px);
+    opacity: 0;
+    clip-path: inset(0 0 100% 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+.notice .print-head {
+  padding: 10px 10px 10px 16px;
+}
+.notice .print-rows {
+  padding: 4px 16px 12px;
+}
+.notice .print-row {
+  grid-template-columns: 96px 1fr;
+  gap: 12px;
+  padding: 6px 0;
+}
+.notice .print-row .v {
+  font-size: var(--t-13);
+}
+.notice .print-row .v.big {
+  font-size: var(--t-16);
+}
+.notice-r {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.notice-tag {
+  font-weight: 750;
+  padding: 1px 6px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+}
+.notice-tag.violation {
+  color: var(--stamp);
+}
+.notice-tag.funded {
+  color: #1d7a5f;
+}
+.notice-tag.data {
+  color: var(--label-ink-2);
+}
+.notice-x {
+  border: 0;
+  background: transparent;
+  color: var(--label-ink-2);
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.notice-x:hover {
+  background: rgba(0, 0, 0, 0.07);
+  color: var(--label-ink);
+}
+
+.oline .tag button.add {
+  width: auto;
+  padding: 0 7px;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  cursor: ns-resize;
+}
+.oline .tag button.add.sl {
+  color: var(--down);
+}
+.oline .tag button.add.tp {
+  color: var(--up);
+}
+.oline .tag button.add:hover {
+  background: var(--ply-3);
+}
+
+.level-toggles {
+  display: flex;
+  gap: var(--s-4);
+}
+
+.chart-head .symbol {
+  font-weight: 700;
+  font-stretch: var(--narrow);
+  letter-spacing: 0.04em;
+  color: var(--ink-1);
+}

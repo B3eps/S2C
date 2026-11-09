@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SeriesMarker, Time } from 'lightweight-charts';
 import { ChartController, LineSpec } from '../lib/chartController';
-import { getFeed, marketBus, fxBus, shooter, useApp, ticketLots, pnlOf, riskOf, Fx } from '../store';
+import { getFeed, marketBus, fxBus, shooter, useApp, ticketLots, pnlOf, riskOf, Fx, LineTarget } from '../store';
 import { TF, TFS, TF_LABEL, Drawing, Side, uid } from '../lib/types';
 import { IND_BY_ID, ActiveInd } from '../lib/indicators';
 import { eventsBetween } from '../lib/calendar';
@@ -10,7 +10,8 @@ import { lots as fmtLots, rMult, signedMoney } from '../lib/format';
 import { Icon } from './Icon';
 import { IndicatorPicker, ParamPopover } from './IndicatorPicker';
 
-type Target = { kind: 'order' | 'pos' | 'ticket'; id?: string; field: 'entry' | 'sl' | 'tp' };
+type Target = LineTarget;
+type Field = 'sl' | 'tp';
 interface OLine {
   key: string;
   price: number;
@@ -20,14 +21,23 @@ interface OLine {
   target: Target;
   draggable: boolean;
   onClose?: () => void;
-  extra?: { label: string; on: () => void }[];
+  closeTitle?: string;
+  /** levels this entry is missing: shown as SL / TP buttons you can click or drag out */
+  missing?: Field[];
   color: string;
   dashed: boolean;
 }
 
 const sideWord = (s: Side) => (s === 'long' ? 'Long' : 'Short');
-const typeWord = { market: 'piyasa', limit: 'limit', stop: 'stop' } as const;
+const typeWord = { market: 'Piyasa', limit: 'Limit', stop: 'Stop' } as const;
 
+/**
+ * One rule for every owner of lines (draft ticket, pending order, open position):
+ *  - the entry tag names the side; its type and size sit in the value, so dragging a pending
+ *    order across the price only changes the word Limit/Stop, never the tag's identity;
+ *  - every SL and TP tag drags freely and has its own ✕;
+ *  - a missing SL or TP shows as a button on the entry tag: click to place it, or drag it out.
+ */
 function useLines(): OLine[] {
   const session = useApp((s) => s.session);
   const ticket = useApp((s) => s.ticket);
@@ -45,7 +55,8 @@ function useLines(): OLine[] {
       const risk = riskOf(entry, sl, lots);
       return `${risk ? rMult(pnl / risk) + ' · ' : ''}${signedMoney(pnl)}`;
     };
-    const slTp = (prefix: string, side: Side, entry: number, lots: number, sl: number | undefined, tp: number | undefined, kind: Target['kind'], id: string | undefined, cls: string, riskSl = sl) => {
+    const missing = (sl?: number, tp?: number): Field[] => [...(sl === undefined ? ['sl' as const] : []), ...(tp === undefined ? ['tp' as const] : [])];
+    const levels = (prefix: string, side: Side, entry: number, lots: number, sl: number | undefined, tp: number | undefined, kind: Target['kind'], id: string | undefined, cls: string, riskSl = sl) => {
       if (sl !== undefined)
         out.push({
           key: `${prefix}-sl`,
@@ -57,7 +68,8 @@ function useLines(): OLine[] {
           draggable: true,
           color: C.down,
           dashed: kind !== 'pos',
-          onClose: kind === 'ticket' ? () => S().updateTicket({ sl: undefined }) : kind === 'pos' ? undefined : undefined,
+          onClose: () => S().clearLevel({ kind, id, field: 'sl' }),
+          closeTitle: 'SL’yi kaldır',
         });
       if (tp !== undefined)
         out.push({
@@ -70,64 +82,65 @@ function useLines(): OLine[] {
           draggable: true,
           color: C.up,
           dashed: kind !== 'pos',
-          onClose: kind === 'ticket' ? () => S().updateTicket({ tp: undefined }) : undefined,
+          onClose: () => S().clearLevel({ kind, id, field: 'tp' }),
+          closeTitle: 'TP’yi kaldır',
         });
     };
 
     for (const p of session.positions) {
       const floating = pnlOf(p.side, p.entry, live.price, p.lots);
       const risk = riskOf(p.entry, p.initialSl, p.lots);
-      const extra: OLine['extra'] = [];
-      const off = Math.abs(live.price - p.entry) || live.price * 0.002;
-      if (p.sl === undefined)
-        extra.push({ label: '+SL', on: () => S().moveLine({ kind: 'pos', id: p.id, field: 'sl' }, p.side === 'long' ? Math.min(p.entry, live.price) - off : Math.max(p.entry, live.price) + off) });
-      if (p.tp === undefined)
-        extra.push({ label: '+TP', on: () => S().moveLine({ kind: 'pos', id: p.id, field: 'tp' }, p.side === 'long' ? Math.max(p.entry, live.price) + off * 2 : Math.min(p.entry, live.price) - off * 2) });
       out.push({
         key: `p-${p.id}`,
         price: p.entry,
-        cls: `entry ${p.side}`,
+        cls: `entry static ${p.side}`,
         k: `${sideWord(p.side)} ${fmtLots(p.lots)}`,
         v: `${risk ? rMult(floating / risk) + ' · ' : ''}${signedMoney(floating)}`,
         target: { kind: 'pos', id: p.id, field: 'entry' },
-        draggable: true,
+        draggable: false,
         onClose: () => S().closePosition(p.id),
-        extra,
+        closeTitle: 'Pozisyonu kapat',
+        missing: missing(p.sl, p.tp),
         color: p.side === 'long' ? C.up : C.down,
         dashed: false,
       });
-      slTp(`p-${p.id}`, p.side, p.entry, p.lots, p.sl, p.tp, 'pos', p.id, '', p.initialSl ?? p.sl);
+      levels(`p-${p.id}`, p.side, p.entry, p.lots, p.sl, p.tp, 'pos', p.id, '', p.initialSl ?? p.sl);
     }
     for (const o of session.orders) {
       out.push({
         key: `o-${o.id}`,
         price: o.price,
         cls: `entry pending ${o.side}`,
-        k: `${sideWord(o.side)} ${typeWord[o.type]}`,
-        v: `${fmtLots(o.lots)} lot`,
+        k: sideWord(o.side),
+        v: `${typeWord[o.type]} · ${fmtLots(o.lots)} lot`,
         target: { kind: 'order', id: o.id, field: 'entry' },
         draggable: true,
         onClose: () => S().cancelOrder(o.id),
+        closeTitle: 'Emri iptal et',
+        missing: missing(o.sl, o.tp),
         color: C.ink2,
         dashed: true,
       });
-      slTp(`o-${o.id}`, o.side, o.price, o.lots, o.sl, o.tp, 'order', o.id, 'pending');
+      levels(`o-${o.id}`, o.side, o.price, o.lots, o.sl, o.tp, 'order', o.id, 'pending');
     }
     if (ticket) {
-      const l = ticketLots(ticket, bal);
+      const entry = ticket.type === 'market' ? live.price : ticket.entry;
+      const l = ticketLots(ticket, bal, entry);
       out.push({
         key: 't-entry',
-        price: ticket.type === 'market' ? live.price : ticket.entry,
+        price: entry,
         cls: `entry ghost ${ticket.side}`,
-        k: `${sideWord(ticket.side)} ${typeWord[ticket.type]}`,
-        v: `${fmtLots(l)} lot`,
+        k: sideWord(ticket.side),
+        v: `${typeWord[ticket.type]} · ${fmtLots(l)} lot`,
         target: { kind: 'ticket', field: 'entry' },
         draggable: true,
         onClose: () => S().cancelTicket(),
+        closeTitle: 'Taslağı sil',
+        missing: missing(ticket.sl, ticket.tp),
         color: C.gold,
         dashed: true,
       });
-      slTp('t', ticket.side, ticket.type === 'market' ? live.price : ticket.entry, l, ticket.sl, ticket.tp, 'ticket', undefined, 'ghost');
+      levels('t', ticket.side, entry, l, ticket.sl, ticket.tp, 'ticket', undefined, 'ghost');
     }
     return out;
   }, [session, ticket, live.price, account]);
@@ -298,24 +311,39 @@ export function ChartPanel({ slot, primary }: { slot: 'a' | 'b'; primary: boolea
     e.stopPropagation();
     const el = e.currentTarget as HTMLElement;
     el.setPointerCapture(e.pointerId);
-    // dragging a position's own line pulls out a stop or a target, decided by the first move
-    let field = l.target.field;
-    let decided = !(l.target.kind === 'pos' && l.target.field === 'entry');
     const move = (ev: PointerEvent) => {
       const p = ctrlRef.current?.yToPrice(localXY(ev).y);
-      if (p == null) return;
-      if (!decided) {
-        const pos = S().session?.positions.find((x) => x.id === l.target.id);
-        if (!pos || Math.abs(p - pos.entry) < 1e-9) return;
-        const below = p < pos.entry;
-        field = (pos.side === 'long') === below ? 'sl' : 'tp';
-        decided = true;
-      }
-      S().moveLine({ ...l.target, field }, p);
+      if (p != null) S().moveLine(l.target, p);
     };
     const up = () => {
       el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerup', up);
+      S().commitLine();
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+  };
+
+  // ── a missing SL / TP: click to place it, or drag it out of the entry tag ──
+  const startDragOut = (l: OLine, field: Field) => (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const el = e.currentTarget as HTMLElement;
+    el.setPointerCapture(e.pointerId);
+    const target = { ...l.target, field };
+    const y0 = e.clientY;
+    let dragged = false;
+    const move = (ev: PointerEvent) => {
+      if (!dragged && Math.abs(ev.clientY - y0) < 3) return;
+      dragged = true;
+      const p = ctrlRef.current?.yToPrice(localXY(ev).y);
+      if (p != null) S().moveLine(target, p);
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      if (!dragged) S().placeLevel(target);
       S().commitLine();
     };
     el.addEventListener('pointermove', move);
@@ -444,6 +472,7 @@ export function ChartPanel({ slot, primary }: { slot: 'a' | 'b'; primary: boolea
   return (
     <div className="chart-panel">
       <div className="chart-head">
+        <span className="symbol">XAUUSD</span>
         <div className="seg" role="group" aria-label="Zaman dilimi">
           {TFS.map((t) => (
             <button key={t} aria-pressed={t === tf} onClick={() => setTf(t)}>
@@ -506,25 +535,23 @@ export function ChartPanel({ slot, primary }: { slot: 'a' | 'b'; primary: boolea
               const y = ctrl.priceToY(l.price);
               if (y == null || y < -10 || y > paneH + 10) return null;
               return (
-                <div key={l.key} className={`oline ${l.cls}`} style={{ transform: `translateY(${y}px)` }} title={l.target.kind === 'pos' && l.target.field === 'entry' ? 'Aşağı/yukarı sürükleyerek SL ya da TP çek' : undefined}>
+                <div key={l.key} className={`oline ${l.cls}`} style={{ transform: `translateY(${y}px)` }}>
                   {l.draggable && <div className="hit" onPointerDown={startDrag(l)} />}
                   <div className="tag" onPointerDown={startDrag(l)}>
                     <span className="k">{l.k}</span>
                     <span className="v">{l.v}</span>
-                    {l.extra?.map((x) => (
-                      <button key={x.label} style={{ width: 'auto', padding: '0 6px', fontWeight: 600 }} onPointerDown={(e) => e.stopPropagation()} onClick={x.on}>
-                        {x.label}
+                    {l.missing?.map((f) => (
+                      <button
+                        key={f}
+                        className={`add ${f}`}
+                        title={`${f === 'sl' ? 'SL' : 'TP'} ekle: tıkla ya da sürükle`}
+                        onPointerDown={startDragOut(l, f)}
+                      >
+                        {f === 'sl' ? 'SL' : 'TP'}
                       </button>
                     ))}
-                    {(l.onClose || (l.target.kind === 'pos' && l.target.field !== 'entry')) && (
-                      <button
-                        title={l.target.field === 'entry' ? (l.target.kind === 'pos' ? 'Pozisyonu kapat' : 'İptal') : 'Kaldır'}
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={() => {
-                          if (l.onClose) return l.onClose();
-                          clearLevel(l.target);
-                        }}
-                      >
+                    {l.onClose && (
+                      <button title={l.closeTitle} onPointerDown={(e) => e.stopPropagation()} onClick={l.onClose}>
                         <Icon name="close" size={12} />
                       </button>
                     )}
@@ -563,17 +590,6 @@ export function ChartPanel({ slot, primary }: { slot: 'a' | 'b'; primary: boolea
       )}
     </div>
   );
-}
-
-function clearLevel(t: Target) {
-  const s = useApp.getState().session;
-  if (!s || !t.id) return;
-  const holder = t.kind === 'pos' ? s.positions.find((p) => p.id === t.id) : s.orders.find((o) => o.id === t.id);
-  if (!holder) return;
-  if (t.field === 'sl') holder.sl = undefined;
-  if (t.field === 'tp') holder.tp = undefined;
-  useApp.setState({ session: { ...s } });
-  useApp.getState().commitLine();
 }
 
 function fmtVal(v: number) {

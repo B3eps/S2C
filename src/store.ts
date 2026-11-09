@@ -48,6 +48,7 @@ export const fxBus = {
 // ── types ─────────────────────────────────────────────────────────────────────
 export type View = 'dashboard' | 'new' | 'trade' | 'journal' | 'stats' | 'settings' | 'replay';
 export type Tool = 'cursor' | DrawingKind;
+export type LineTarget = { kind: 'order' | 'pos' | 'ticket'; id?: string; field: 'entry' | 'sl' | 'tp' };
 
 export interface Ticket {
   side: Side;
@@ -71,7 +72,16 @@ export type Overlay =
   | { kind: 'funded'; account: Account }
   | { kind: 'violation'; account: Account; reason: string }
   | { kind: 'payout'; account: Account; amount: number; gross: number }
-  | { kind: 'reveal'; session: SessionRec; trades: Trade[]; account: Account; then?: Overlay };
+;
+
+/** Session report shown as a corner card; it never interrupts the screen. */
+export interface Notice {
+  id: string;
+  session: SessionRec;
+  trades: Trade[];
+  account: Account;
+  reason: 'user' | 'violation' | 'funded' | 'data';
+}
 
 export interface ChartPrefs {
   layout: 'single' | 'dual';
@@ -109,6 +119,7 @@ interface State {
   tool: Tool;
   ticket: Ticket | null;
   overlay: Overlay | null;
+  notices: Notice[];
   replayTradeId: string | null;
   journalTradeId: string | null;
   sessionTrades: Trade[];
@@ -130,7 +141,9 @@ interface State {
   cancelTicket(): void;
   cancelOrder(id: string): void;
   closePosition(id: string): void;
-  moveLine(target: { kind: 'order' | 'pos' | 'ticket'; id?: string; field: 'entry' | 'sl' | 'tp' }, price: number): void;
+  moveLine(target: LineTarget, price: number): void;
+  clearLevel(target: LineTarget): void;
+  placeLevel(target: LineTarget): void;
   commitLine(): void;
   addDrawing(d: Drawing): void;
   updateDrawing(d: Drawing): void;
@@ -138,6 +151,8 @@ interface State {
   clearDrawings(): void;
   requestPayout(accountId: string): Promise<void>;
   dismissOverlay(): void;
+  dismissNotice(id: string): void;
+  toggleTicketLevel(field: 'sl' | 'tp'): void;
   saveNote(tradeId: string, note: string): Promise<void>;
   saveSettings(s: Partial<Settings>): Promise<void>;
   openReplay(tradeId: string): void;
@@ -152,9 +167,9 @@ export const riskOf = (entry: number, sl: number | undefined, lots: number) =>
   sl === undefined ? undefined : Math.abs(entry - sl) * lots * CONTRACT;
 const roundLots = (x: number) => Math.max(MIN_LOT, Math.floor(x / MIN_LOT + 1e-9) * MIN_LOT);
 
-export function ticketLots(t: Ticket, balance: number) {
-  if (t.useRisk && t.sl !== undefined && Math.abs(t.entry - t.sl) > 0) {
-    return roundLots((balance * t.riskPct) / 100 / (Math.abs(t.entry - t.sl) * CONTRACT));
+export function ticketLots(t: Ticket, balance: number, entry = t.entry) {
+  if (t.useRisk && t.sl !== undefined && Math.abs(entry - t.sl) > 0) {
+    return roundLots((balance * t.riskPct) / 100 / (Math.abs(entry - t.sl) * CONTRACT));
   }
   return roundLots(t.manualLots);
 }
@@ -199,6 +214,15 @@ const DEFAULT_PREFS: ChartPrefs = {
 };
 
 let warned = { day: false, max: false };
+let lastTicket = { riskPct: 1, manualLots: 0.1, useRisk: true, withSl: true, withTp: true };
+
+/** 1.5 × ATR(14) of the main chart: where a fresh stop is first drawn. */
+export function defaultDistance() {
+  const f = getFeed();
+  if (!f) return 1;
+  const bars = f.bars(useApp.getState().prefs.tfA);
+  return (atr(bars.slice(-200), 14).at(-1) || f.price * 0.002) * 1.5;
+}
 let playRaf = 0;
 
 // ── store ─────────────────────────────────────────────────────────────────────
@@ -451,6 +475,7 @@ export const useApp = create<State>((set, get) => {
     tool: 'cursor',
     ticket: null,
     overlay: null,
+    notices: [],
     replayTradeId: null,
     journalTradeId: null,
     sessionTrades: [],
@@ -579,17 +604,23 @@ export const useApp = create<State>((set, get) => {
       await db.putSession(s);
       runShots();
       const trades = get().trades.filter((t) => t.sessionId === s.id);
-      let then: Overlay | undefined;
-      if (reason === 'violation') then = { kind: 'violation', account: { ...a }, reason: a.violation ?? '' };
-      if (reason === 'funded') then = { kind: 'funded', account: { ...a } };
-      const overlay: Overlay = { kind: 'reveal', session: { ...s }, trades, account: { ...a }, then };
+      let overlay: Overlay | null = null;
+      if (reason === 'violation') overlay = { kind: 'violation', account: { ...a }, reason: a.violation ?? '' };
+      if (reason === 'funded') overlay = { kind: 'funded', account: { ...a } };
+      const notice: Notice = { id: uid(), session: { ...s }, trades, account: { ...a }, reason };
+      // screenshots are taken from the chart, so let them finish before it unmounts
+      await new Promise((r) => setTimeout(r, 400));
+      feed = null;
       set({
         sessions: get().sessions.map((x) => (x.id === s.id ? { ...s } : x)),
-        overlay: then ?? overlay,
+        session: null,
+        ticket: null,
+        sessionTrades: [],
+        overlay,
+        notices: [...get().notices, notice].slice(-3),
       });
-      // violation and funding are shown first, the reveal follows
-      if (then) pendingReveal = overlay;
-      play('print');
+      if (get().view === 'trade') get().go('dashboard');
+      if (!overlay) play('print');
     },
 
     stepMinutes(n) {
@@ -654,7 +685,7 @@ export const useApp = create<State>((set, get) => {
         while (acc >= 1 && guard++ < 64) {
           acc -= 1;
           get().stepBar();
-          if (!get().session || get().overlay) {
+          if (!get().session || get().overlay?.kind === 'violation' || get().overlay?.kind === 'funded') {
             set({ playing: false });
             return;
           }
@@ -679,19 +710,16 @@ export const useApp = create<State>((set, get) => {
       if (!feed || !a) return;
       const price = feed.price;
       const e = type === 'market' || entry === undefined ? price : entry;
-      const bars = feed.bars(get().prefs.tfA);
-      const atrV = atr(bars.slice(-200), 14).at(-1) || price * 0.002;
-      const dist = atrV * 1.5;
-      const prev = get().ticket;
+      const dist = defaultDistance();
       const t: Ticket = {
         side,
         type: type === 'market' ? 'market' : deriveType(side, e, price),
         entry: e,
-        sl: e - dir(side) * dist,
-        tp: e + dir(side) * dist * 2,
-        riskPct: prev?.riskPct ?? 1,
-        manualLots: prev?.manualLots ?? 0.1,
-        useRisk: prev?.useRisk ?? true,
+        sl: lastTicket.withSl ? e - dir(side) * dist : undefined,
+        tp: lastTicket.withTp ? e + dir(side) * dist * 2 : undefined,
+        riskPct: lastTicket.riskPct,
+        manualLots: lastTicket.manualLots,
+        useRisk: lastTicket.useRisk,
       };
       set({ ticket: t });
     },
@@ -701,10 +729,13 @@ export const useApp = create<State>((set, get) => {
       if (!t) return;
       const next = { ...t, ...p };
       if (p.type === 'market' && feed) next.entry = feed.price;
+      lastTicket = { ...lastTicket, riskPct: next.riskPct, manualLots: next.manualLots, useRisk: next.useRisk };
       if (p.side && p.side !== t.side) {
-        // mirror the stop and target around the entry
-        if (t.sl !== undefined) next.sl = next.entry - (t.sl - t.entry);
-        if (t.tp !== undefined) next.tp = next.entry - (t.tp - t.entry);
+        // mirror the stop and target around where the order would actually enter
+        const base = t.type === 'market' && feed ? feed.price : t.entry;
+        next.entry = base;
+        if (t.sl !== undefined) next.sl = base - (t.sl - base);
+        if (t.tp !== undefined) next.tp = base - (t.tp - base);
         if (next.type !== 'market' && feed) next.type = deriveType(next.side, next.entry, feed.price);
       }
       set({ ticket: next });
@@ -715,11 +746,16 @@ export const useApp = create<State>((set, get) => {
       const s = get().session;
       const a = account();
       if (!t || !s || !a || !feed) return;
-      const lotsN = ticketLots(t, a.balance);
+      const live = feed.price;
+      const lotsN = ticketLots(t, a.balance, t.type === 'market' ? live : t.entry);
       if (t.type === 'market') {
-        const entry = feed.price;
-        const shift = entry - t.entry;
-        openPos(t.side, lotsN, entry, t.sl !== undefined ? t.sl + shift : undefined, t.tp !== undefined ? t.tp + shift : undefined, 'market', feed.current.t);
+        const long = t.side === 'long';
+        // a level the price has already crossed would fire at once: drop it and say so
+        const sl = t.sl !== undefined && (long ? t.sl < live : t.sl > live) ? t.sl : undefined;
+        const tp = t.tp !== undefined && (long ? t.tp > live : t.tp < live) ? t.tp : undefined;
+        if (t.sl !== undefined && sl === undefined) get().showToast('SL fiyatın öbür tarafında kaldığı için konmadı.', 'warn');
+        if (t.tp !== undefined && tp === undefined) get().showToast('TP fiyatın öbür tarafında kaldığı için konmadı.', 'warn');
+        openPos(t.side, lotsN, live, sl, tp, 'market', feed.current.t);
         runShots();
       } else {
         const type = deriveType(t.side, t.entry, feed.price);
@@ -814,6 +850,49 @@ export const useApp = create<State>((set, get) => {
       set({ session: { ...s } });
     },
 
+    clearLevel(target) {
+      if (target.field === 'entry') return;
+      const f = target.field;
+      if (target.kind === 'ticket') {
+        const t = get().ticket;
+        if (!t) return;
+        lastTicket = { ...lastTicket, [f === 'sl' ? 'withSl' : 'withTp']: false };
+        set({ ticket: { ...t, [f]: undefined } });
+        return;
+      }
+      const s = get().session;
+      if (!s) return;
+      const h = target.kind === 'pos' ? s.positions.find((x) => x.id === target.id) : s.orders.find((x) => x.id === target.id);
+      if (!h) return;
+      h[f] = undefined;
+      set({ session: { ...s } });
+      persistSession(s, true);
+      play('cancel');
+    },
+
+    placeLevel(target) {
+      if (target.field === 'entry' || !feed) return;
+      const f = target.field;
+      const d = defaultDistance();
+      const s = get().session;
+      let side: Side;
+      let entry: number;
+      if (target.kind === 'ticket') {
+        const t = get().ticket;
+        if (!t) return;
+        side = t.side;
+        entry = t.type === 'market' ? feed.price : t.entry;
+      } else {
+        const h = target.kind === 'pos' ? s?.positions.find((x) => x.id === target.id) : s?.orders.find((x) => x.id === target.id);
+        if (!h) return;
+        side = h.side;
+        // a live position measures from wherever is further from the market, so the level never fires at once
+        entry = 'entry' in h ? (f === 'sl' ? (side === 'long' ? Math.min(h.entry, feed.price) : Math.max(h.entry, feed.price)) : side === 'long' ? Math.max(h.entry, feed.price) : Math.min(h.entry, feed.price)) : h.price;
+      }
+      const price = f === 'sl' ? entry - dir(side) * d : entry + dir(side) * d * 2;
+      get().moveLine(target, price);
+    },
+
     commitLine() {
       const s = get().session;
       s?.positions.forEach((p) => {
@@ -880,22 +959,25 @@ export const useApp = create<State>((set, get) => {
     },
 
     dismissOverlay() {
-      const o = get().overlay;
-      if (o && o.kind !== 'reveal' && o.kind !== 'payout' && pendingReveal) {
-        const r = pendingReveal;
-        pendingReveal = null;
-        set({ overlay: r });
-        play('print');
-        return;
-      }
-      if (o?.kind === 'reveal') {
-        feed = null;
-        set({ overlay: null, session: null, ticket: null, sessionTrades: [] });
-        get().go('dashboard');
-        marketBus.emit('reset');
-        return;
-      }
       set({ overlay: null });
+    },
+
+    dismissNotice(id) {
+      set({ notices: get().notices.filter((n) => n.id !== id) });
+    },
+
+    toggleTicketLevel(field) {
+      const t = get().ticket;
+      if (!t || !feed) return;
+      const entry = t.type === 'market' ? feed.price : t.entry;
+      const next = { ...t };
+      if (next[field] !== undefined) next[field] = undefined;
+      else {
+        const d = defaultDistance();
+        next[field] = field === 'sl' ? entry - dir(t.side) * d : entry + dir(t.side) * d * 2;
+      }
+      lastTicket = { ...lastTicket, withSl: next.sl !== undefined, withTp: next.tp !== undefined };
+      set({ ticket: next });
     },
 
     async saveNote(tradeId, note) {
@@ -931,6 +1013,5 @@ export const useApp = create<State>((set, get) => {
   };
 });
 
-let pendingReveal: Overlay | null = null;
 
 if (import.meta.env.DEV) (window as unknown as { __s2c: typeof useApp }).__s2c = useApp;

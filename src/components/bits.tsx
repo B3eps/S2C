@@ -99,13 +99,13 @@ export function CertLabel({ a, compact, className = '', stampAnim }: { a: Accoun
       <div className="cert-main">
         {compact ? (
           <>
-            <span className="cert-top">XAU · {sizeLabel(a.size)}</span>
+            <span className="cert-top">XAUUSD · {sizeLabel(a.size)}</span>
             <span className="cert-no">{a.no}</span>
           </>
         ) : (
           <>
             <div className="cert-top">
-              <span>Altın · XAU</span>
+              <span>XAUUSD</span>
               <span className="sep" />
               <span>{sizeLabel(a.size)} hesap</span>
               <span className="sep" />

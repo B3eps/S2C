@@ -9,7 +9,7 @@ import { Journal } from './views/Journal';
 import { Stats } from './views/Stats';
 import { Settings } from './views/Settings';
 import { Replay } from './views/Replay';
-import { Overlays } from './views/Overlays';
+import { Overlays, Notices } from './views/Overlays';
 
 const NAV: [View, string, IconName][] = [
   ['dashboard', 'Panel', 'panel'],
@@ -60,6 +60,7 @@ export function App() {
         {view === 'replay' && <Replay />}
       </main>
       <Overlays />
+      <Notices />
       {toast && (
         <div className={`toast ${toast.tone}`} role="status">
           {toast.tone !== 'neutral' && <Icon name="warn" size={16} />}

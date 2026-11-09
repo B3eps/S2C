@@ -4,7 +4,7 @@ import { ChartPanel } from '../components/ChartPanel';
 import { CertLabel, CountUp, RuleGauges } from '../components/bits';
 import { Icon } from '../components/Icon';
 import { marketSession } from '../lib/calendar';
-import { clockUtc, lots as fmtLots, money, rMult, signedMoney } from '../lib/format';
+import { clockUtc, lots as fmtLots, money, money0, rMult, signedMoney } from '../lib/format';
 import { C } from '../lib/theme';
 
 export function Trade() {
@@ -185,7 +185,7 @@ function OrderPanel() {
 
   const side = ticket?.side;
   const entry = ticket ? (ticket.type === 'market' ? live.price : ticket.entry) : 0;
-  const l = ticket ? ticketLots(ticket, account.balance) : 0;
+  const l = ticket ? ticketLots(ticket, account.balance, entry) : 0;
   const risk = ticket ? riskOf(entry, ticket.sl, l) : undefined;
   const reward = ticket && ticket.tp !== undefined ? Math.abs(pnlOf(ticket.side, entry, ticket.tp, l)) : undefined;
   const rr = risk && reward ? reward / risk : undefined;
@@ -235,15 +235,25 @@ function OrderPanel() {
                 Bekleyen {ticket.type !== 'market' ? `· ${ticket.type === 'limit' ? 'limit' : 'stop'}` : ''}
               </button>
             </div>
-            {ticket.type !== 'market' && <div className="hint-line">Giriş çizgisini grafikte sürükle. Tip, fiyata göre limit ya da stop olur.</div>}
+            {ticket.type !== 'market' && <div className="hint-line">Giriş çizgisini grafikte sürükle. Fiyatın altında long limit, üstünde long stop olur (short için tersi).</div>}
+            <div className="level-toggles">
+              <label className="check">
+                <input type="checkbox" checked={ticket.sl !== undefined} onChange={() => S().toggleTicketLevel('sl')} />
+                Zarar durdur (SL)
+              </label>
+              <label className="check">
+                <input type="checkbox" checked={ticket.tp !== undefined} onChange={() => S().toggleTicketLevel('tp')} />
+                Kâr al (TP)
+              </label>
+            </div>
           </div>
 
           <div className="order-sec">
-            <label className="check">
-              <input type="checkbox" checked={ticket.useRisk} onChange={(e) => S().updateTicket({ useRisk: e.target.checked })} />
+            <label className="check" style={{ opacity: ticket.sl === undefined ? 0.5 : 1 }}>
+              <input type="checkbox" checked={ticket.useRisk && ticket.sl !== undefined} disabled={ticket.sl === undefined} onChange={(e) => S().updateTicket({ useRisk: e.target.checked })} />
               Lotu riske göre hesapla
             </label>
-            {ticket.useRisk ? (
+            {ticket.useRisk && ticket.sl !== undefined ? (
               <>
                 <div className="field">
                   <span>İşlem başına risk (hesabın %)</span>
@@ -264,11 +274,10 @@ function OrderPanel() {
                     onChange={(e) => S().updateTicket({ riskPct: Math.max(0.05, Math.min(10, parseFloat(e.target.value) || 0.05)) })}
                   />
                 </div>
-                {ticket.sl === undefined && <div className="hint-line warn-c">Risk hesabı için SL gerekli.</div>}
               </>
             ) : (
               <label className="field">
-                <span>Lot</span>
+                <span>Lot{ticket.sl === undefined ? ' (SL olmadan lotu sen seçersin)' : ''}</span>
                 <input
                   className="input"
                   type="number"
@@ -286,7 +295,7 @@ function OrderPanel() {
               <dt>Lot</dt>
               <dd>{fmtLots(l)}</dd>
               <dt>Risk</dt>
-              <dd className={tooBig ? 'down' : ''}>{risk !== undefined ? `${money(risk)} · %${riskPctAcc!.toFixed(2).replace('.', ',')}` : '—'}</dd>
+              <dd className={tooBig ? 'down' : ''}>{risk !== undefined ? `${money(risk)} · %${riskPctAcc!.toFixed(2).replace('.', ',')}` : 'Sınırsız (SL yok)'}</dd>
               <dt>Hedef kazanç</dt>
               <dd>{reward !== undefined ? money(reward) : '—'}</dd>
               <dt>Risk / ödül</dt>
@@ -303,7 +312,7 @@ function OrderPanel() {
               <button className="btn" onClick={() => S().cancelTicket()}>
                 İptal
               </button>
-              <button className={`btn primary`} onClick={() => S().submitTicket()} disabled={ticket.useRisk && ticket.sl === undefined}>
+              <button className={`btn primary`} onClick={() => S().submitTicket()}>
                 {ticket.type === 'market' ? `${ticket.side === 'long' ? 'Long' : 'Short'} aç` : 'Emri yerleştir'}
               </button>
             </div>
@@ -312,19 +321,43 @@ function OrderPanel() {
       )}
 
       <div className="order-sec" style={{ borderBottom: 0 }}>
-        <h2 style={{ fontSize: 'var(--t-12)', color: 'var(--ink-3)', fontWeight: 500 }}>Hesap kuralları</h2>
+        <h2 style={{ fontSize: 'var(--t-12)', color: 'var(--ink-3)', fontWeight: 500 }}>
+          {account.phase === 'challenge' ? 'Değerlendirme kuralları' : 'Fonlu hesap kuralları'}
+        </h2>
         <dl className="kv">
-          <dt>Kâr hedefi</dt>
-          <dd>{account.phase === 'challenge' ? `%${account.rules.target}` : '—'}</dd>
           <dt>Günlük zarar limiti</dt>
-          <dd>%{account.rules.dailyLoss}</dd>
+          <dd>
+            %{account.rules.dailyLoss} · {money0((account.size * account.rules.dailyLoss) / 100)}
+          </dd>
           <dt>Toplam zarar limiti</dt>
-          <dd>%{account.rules.maxLoss}</dd>
-          <dt>Asgari işlem günü</dt>
-          <dd>{account.phase === 'challenge' ? account.rules.minDays : '—'}</dd>
-          <dt>Kâr payı</dt>
-          <dd>%{account.rules.split}</dd>
+          <dd>
+            %{account.rules.maxLoss} · alt sınır {money0(lim.maxFloor)}
+          </dd>
+          {account.phase === 'challenge' ? (
+            <>
+              <dt>Kâr hedefi</dt>
+              <dd>
+                %{account.rules.target} · {money0(lim.target)}
+              </dd>
+              <dt>Asgari işlem günü</dt>
+              <dd>
+                {new Set(account.tradingDays).size} / {account.rules.minDays}
+              </dd>
+            </>
+          ) : (
+            <>
+              <dt>Ödeme eşiği</dt>
+              <dd>
+                %{account.rules.payoutMin} · {money0(lim.payoutAt)}
+              </dd>
+              <dt>Kâr payın</dt>
+              <dd>%{account.rules.split}</dd>
+              <dt>Ödeme şartı</dt>
+              <dd>açık pozisyon yok</dd>
+            </>
+          )}
         </dl>
+        {account.phase === 'funded' && <div className="hint-line">Fonlu hesapta zarar limitleri aynen geçerli. Aşılırsa hesap kapanır.</div>}
         {account.phase === 'funded' && (
           <button className="btn" disabled={account.balance < lim.payoutAt || session.positions.length > 0} onClick={() => S().requestPayout(account.id)}>
             <Icon name="coin" size={16} /> Ödeme iste

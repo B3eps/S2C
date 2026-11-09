@@ -38,7 +38,7 @@ export function NewAccount() {
               <div className="cert">
                 <div className="cert-main">
                   <div className="cert-top">
-                    <span>Altın · XAU</span>
+                    <span>XAUUSD</span>
                     <span className="sep" />
                     <span>Değerlendirme</span>
                   </div>
