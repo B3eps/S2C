@@ -45,14 +45,14 @@ function useLines(): OLine[] {
       const risk = riskOf(entry, sl, lots);
       return `${risk ? rMult(pnl / risk) + ' · ' : ''}${signedMoney(pnl)}`;
     };
-    const slTp = (prefix: string, side: Side, entry: number, lots: number, sl: number | undefined, tp: number | undefined, kind: Target['kind'], id: string | undefined, cls: string) => {
+    const slTp = (prefix: string, side: Side, entry: number, lots: number, sl: number | undefined, tp: number | undefined, kind: Target['kind'], id: string | undefined, cls: string, riskSl = sl) => {
       if (sl !== undefined)
         out.push({
           key: `${prefix}-sl`,
           price: sl,
           cls: `sl ${cls}`,
           k: 'SL',
-          v: lvl(side, entry, sl, lots, sl),
+          v: lvl(side, entry, sl, lots, riskSl),
           target: { kind, id, field: 'sl' },
           draggable: true,
           color: C.down,
@@ -65,7 +65,7 @@ function useLines(): OLine[] {
           price: tp,
           cls: `tp ${cls}`,
           k: 'TP',
-          v: lvl(side, entry, tp, lots, sl),
+          v: lvl(side, entry, tp, lots, riskSl),
           target: { kind, id, field: 'tp' },
           draggable: true,
           color: C.up,
@@ -86,17 +86,17 @@ function useLines(): OLine[] {
       out.push({
         key: `p-${p.id}`,
         price: p.entry,
-        cls: `entry static ${p.side}`,
+        cls: `entry ${p.side}`,
         k: `${sideWord(p.side)} ${fmtLots(p.lots)}`,
         v: `${risk ? rMult(floating / risk) + ' · ' : ''}${signedMoney(floating)}`,
         target: { kind: 'pos', id: p.id, field: 'entry' },
-        draggable: false,
+        draggable: true,
         onClose: () => S().closePosition(p.id),
         extra,
         color: p.side === 'long' ? C.up : C.down,
         dashed: false,
       });
-      slTp(`p-${p.id}`, p.side, p.entry, p.lots, p.sl, p.tp, 'pos', p.id, '');
+      slTp(`p-${p.id}`, p.side, p.entry, p.lots, p.sl, p.tp, 'pos', p.id, '', p.initialSl ?? p.sl);
     }
     for (const o of session.orders) {
       out.push({
@@ -122,7 +122,7 @@ function useLines(): OLine[] {
         k: `${sideWord(ticket.side)} ${typeWord[ticket.type]}`,
         v: `${fmtLots(l)} lot`,
         target: { kind: 'ticket', field: 'entry' },
-        draggable: ticket.type !== 'market',
+        draggable: true,
         onClose: () => S().cancelTicket(),
         color: C.gold,
         dashed: true,
@@ -298,9 +298,20 @@ export function ChartPanel({ slot, primary }: { slot: 'a' | 'b'; primary: boolea
     e.stopPropagation();
     const el = e.currentTarget as HTMLElement;
     el.setPointerCapture(e.pointerId);
+    // dragging a position's own line pulls out a stop or a target, decided by the first move
+    let field = l.target.field;
+    let decided = !(l.target.kind === 'pos' && l.target.field === 'entry');
     const move = (ev: PointerEvent) => {
       const p = ctrlRef.current?.yToPrice(localXY(ev).y);
-      if (p != null) S().moveLine(l.target, p);
+      if (p == null) return;
+      if (!decided) {
+        const pos = S().session?.positions.find((x) => x.id === l.target.id);
+        if (!pos || Math.abs(p - pos.entry) < 1e-9) return;
+        const below = p < pos.entry;
+        field = (pos.side === 'long') === below ? 'sl' : 'tp';
+        decided = true;
+      }
+      S().moveLine({ ...l.target, field }, p);
     };
     const up = () => {
       el.removeEventListener('pointermove', move);
@@ -495,7 +506,7 @@ export function ChartPanel({ slot, primary }: { slot: 'a' | 'b'; primary: boolea
               const y = ctrl.priceToY(l.price);
               if (y == null || y < -10 || y > paneH + 10) return null;
               return (
-                <div key={l.key} className={`oline ${l.cls}`} style={{ transform: `translateY(${y}px)` }}>
+                <div key={l.key} className={`oline ${l.cls}`} style={{ transform: `translateY(${y}px)` }} title={l.target.kind === 'pos' && l.target.field === 'entry' ? 'Aşağı/yukarı sürükleyerek SL ya da TP çek' : undefined}>
                   {l.draggable && <div className="hit" onPointerDown={startDrag(l)} />}
                   <div className="tag" onPointerDown={startDrag(l)}>
                     <span className="k">{l.k}</span>

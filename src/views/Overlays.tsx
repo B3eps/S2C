@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { useApp } from '../store';
 import { CertLabel } from '../components/bits';
 import { Emblem } from '../components/Emblem';
@@ -8,13 +7,6 @@ import { summarize } from '../lib/stats';
 export function Overlays() {
   const o = useApp((s) => s.overlay);
   const dismiss = useApp((s) => s.dismissOverlay);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (o && (e.key === 'Enter' || e.key === 'Escape')) dismiss();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [o, dismiss]);
   if (!o) return null;
 
   if (o.kind === 'funded')

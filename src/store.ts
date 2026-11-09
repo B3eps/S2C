@@ -313,7 +313,7 @@ export const useApp = create<State>((set, get) => {
   const openPos = (side: Side, lots: number, entry: number, sl: number | undefined, tp: number | undefined, type: OrderType, at: number) => {
     const s = get().session!;
     const a = account()!;
-    const p: Position = { id: uid(), side, lots, entry, sl, tp, initialSl: sl, openedAt: at, orderType: type };
+    const p: Position = { id: uid(), side, lots, entry, sl, tp, initialSl: sl, riskLocked: sl !== undefined, openedAt: at, orderType: type };
     s.positions.push(p);
     const key = `${s.id}:${dayKeyUtc(at)}`;
     if (!a.tradingDays.includes(key)) a.tradingDays.push(key);
@@ -427,7 +427,9 @@ export const useApp = create<State>((set, get) => {
 
   const afterSteps = (revealed: number) => {
     if (!revealed) return;
-    set({ live: computeLive(), session: { ...get().session! } });
+    const s = get().session!;
+    if (feed) s.clockMs = feed.clock;
+    set({ live: computeLive(), session: { ...s } });
     marketBus.emit('update');
     runShots();
     persistSession(get().session);
@@ -472,11 +474,24 @@ export const useApp = create<State>((set, get) => {
         settings: st,
         prefs: { ...DEFAULT_PREFS, ...(prefs ?? {}) },
       });
+      let last: string | null = null;
+      try {
+        last = localStorage.getItem('s2c:view');
+      } catch {
+        last = null;
+      }
+      const open = sessions.find((x) => !x.endedAt && accounts.some((a) => a.id === x.accountId && a.status === 'active'));
+      if (last === 'trade' && open) await get().startSession(open.accountId);
     },
 
     go(view) {
       if (view !== 'trade') get().setPlaying(false);
       set({ view });
+      try {
+        localStorage.setItem('s2c:view', view);
+      } catch {
+        /* storage unavailable: start on the dashboard next time */
+      }
     },
 
     async createAccount(size) {
@@ -520,6 +535,11 @@ export const useApp = create<State>((set, get) => {
         };
       }
       set({ view: 'trade', loading: { progress: 0 }, session: null, ticket: null, tool: 'cursor', playing: false });
+      try {
+        localStorage.setItem('s2c:view', 'trade');
+      } catch {
+        /* ignore */
+      }
       try {
         feed = await Feed.create(s.startMs, s.clockMs, (p) => set({ loading: { progress: p } }));
       } catch {
@@ -789,13 +809,20 @@ export const useApp = create<State>((set, get) => {
         // a stop can trail past entry, but never through the current price
         if (target.field === 'sl') p.sl = p.side === 'long' ? Math.min(price, cur - 0.01) : Math.max(price, cur + 0.01);
         else if (target.field === 'tp') p.tp = p.side === 'long' ? Math.max(price, cur + 0.01) : Math.min(price, cur - 0.01);
-        if (p.initialSl === undefined && p.sl !== undefined) p.initialSl = p.sl;
+        if (!p.riskLocked && p.sl !== undefined) p.initialSl = p.sl;
       }
       set({ session: { ...s } });
     },
 
     commitLine() {
-      persistSession(get().session, true);
+      const s = get().session;
+      s?.positions.forEach((p) => {
+        if (p.sl !== undefined && !p.riskLocked) {
+          p.initialSl = p.sl;
+          p.riskLocked = true;
+        }
+      });
+      persistSession(s, true);
       play('place');
     },
 
@@ -863,7 +890,8 @@ export const useApp = create<State>((set, get) => {
       }
       if (o?.kind === 'reveal') {
         feed = null;
-        set({ overlay: null, session: null, ticket: null, view: 'dashboard', sessionTrades: [] });
+        set({ overlay: null, session: null, ticket: null, sessionTrades: [] });
+        get().go('dashboard');
         marketBus.emit('reset');
         return;
       }

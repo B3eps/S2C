@@ -1,8 +1,7 @@
 import { Bar, TF, TFS, TF_MS } from './types';
 
-const API = 'https://api.binance.com/api/v3/klines';
-const SYMBOL = 'PAXGUSDT';
 const MIN = 60_000;
+const DAY = 86_400_000;
 
 /** Gold does not trade on weekends: hide Fri 21:00 UTC → Sun 22:00 UTC. */
 export function isClosed(t: number) {
@@ -12,24 +11,15 @@ export function isClosed(t: number) {
   return (day === 5 && h >= 21) || day === 6 || (day === 0 && h < 22);
 }
 
-async function fetchKlines(interval: TF, q: { startTime?: number; endTime?: number; limit: number }): Promise<Bar[]> {
-  const p = new URLSearchParams({ symbol: SYMBOL, interval, limit: String(q.limit) });
-  if (q.startTime !== undefined) p.set('startTime', String(q.startTime));
-  if (q.endTime !== undefined) p.set('endTime', String(q.endTime));
+/** Real XAU/USD candles (Dukascopy) served by the local endpoint in vite.config.ts. */
+async function fetchCandles(tf: TF, from: number, to: number): Promise<Bar[]> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const res = await fetch(`${API}?${p}`);
-      if (!res.ok) throw new Error(`Binance ${res.status}`);
-      const raw = (await res.json()) as unknown[][];
-      return raw.map((k) => ({
-        t: k[0] as number,
-        o: +(k[1] as string),
-        h: +(k[2] as string),
-        l: +(k[3] as string),
-        c: +(k[4] as string),
-        v: +(k[5] as string),
-      }));
+      const res = await fetch(`/api/candles?tf=${tf}&from=${Math.floor(from)}&to=${Math.floor(to)}`);
+      if (!res.ok) throw new Error(`XAU ${res.status}`);
+      const raw = (await res.json()) as number[][];
+      return raw.map(([t, o, h, l, c, v]) => ({ t, o, h, l, c, v })).filter((b) => !isClosed(b.t));
     } catch (e) {
       lastErr = e;
       await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
@@ -38,30 +28,23 @@ async function fetchKlines(interval: TF, q: { startTime?: number; endTime?: numb
   throw lastErr;
 }
 
-export async function fetchRange(interval: TF, from: number, to: number): Promise<Bar[]> {
-  const out: Bar[] = [];
-  let cursor = from;
-  while (cursor < to) {
-    const chunk = await fetchKlines(interval, { startTime: cursor, endTime: to, limit: 1000 });
-    if (!chunk.length) break;
-    out.push(...chunk);
-    cursor = chunk[chunk.length - 1].t + TF_MS[interval];
-    if (chunk.length < 1000) break;
-  }
-  return out.filter((b) => !isClosed(b.t));
+export const fetchRange = fetchCandles;
+
+/** Last `count` closed bars that opened before `end`. */
+async function fetchBefore(tf: TF, end: number, count: number): Promise<Bar[]> {
+  // ~5 trading days in 7, plus holidays: ask for twice the span
+  const span = Math.max(TF_MS[tf] * count * 2, 3 * DAY);
+  const bars = await fetchCandles(tf, end - span, end);
+  return bars.slice(-count);
 }
 
-/**
- * Random minute from 2024 onward (PAXG trades thinly on Binance before that, which shows up as
- * flat candles), starting between 06:00 and 19:00 UTC so a session opens into liquid hours.
- */
+/** Random minute inside the last three years (ending two weeks ago), inside trading hours. */
 export function randomStart(): number {
-  const lo = Date.UTC(2024, 0, 1);
-  const hi = Date.now() - 14 * 86_400_000;
+  const hi = Date.now() - 14 * DAY;
+  const lo = Date.now() - 3 * 365 * DAY;
   for (;;) {
     const t = Math.floor((lo + Math.random() * (hi - lo)) / MIN) * MIN;
-    const h = new Date(t).getUTCHours();
-    if (h >= 6 && h < 19 && !isClosed(t) && !isClosed(t - 6 * 3_600_000)) return t;
+    if (!isClosed(t) && !isClosed(t - 6 * 3_600_000)) return t;
   }
 }
 
@@ -91,42 +74,36 @@ export class Feed {
     const tick = () => onProgress?.(++done / (TFS.length + 1));
     await Promise.all(
       TFS.map(async (tf) => {
-        const bars = await fetchKlines(tf, { endTime: f.base0 - 1, limit: HIST + 200 });
-        f.hist[tf] = bars.filter((b) => !isClosed(b.t)).slice(-HIST);
+        f.hist[tf] = await fetchBefore(tf, f.base0, HIST);
         tick();
       }),
     );
-    await f.loadMore(Math.max(clockMs, startMs) + 1200 * MIN);
+    await f.loadMore(Math.max(clockMs, startMs) + 2 * DAY);
     tick();
     f.advanceTo(clockMs);
     return f;
   }
 
+  private cursor = 0;
+
   private async loadMore(until: number) {
-    let from = this.minutes.length ? this.minutes[this.minutes.length - 1].t + MIN : this.base0;
+    if (!this.cursor) this.cursor = this.base0;
     const now = Date.now() - 2 * MIN;
-    while (from < until && from < now) {
-      const chunk = await fetchKlines('1m', { startTime: from, limit: 1000 });
-      if (!chunk.length) {
-        this.exhausted = true;
-        return;
-      }
-      this.minutes.push(...chunk.filter((b) => !isClosed(b.t)));
-      from = chunk[chunk.length - 1].t + MIN;
-      if (chunk.length < 1000) {
-        this.exhausted = true;
-        return;
-      }
+    while (this.cursor < until && this.cursor < now) {
+      const to = Math.min(this.cursor + 2 * DAY, now);
+      const chunk = await fetchCandles('1m', this.cursor, to);
+      const last = this.minutes[this.minutes.length - 1];
+      this.minutes.push(...(last ? chunk.filter((b) => b.t > last.t) : chunk));
+      this.cursor = to;
     }
-    if (from >= now) this.exhausted = true;
+    if (this.cursor >= now) this.exhausted = true;
   }
 
   /** Prefetch more minutes in the background when the cursor nears the end. */
   ensureAhead() {
     if (this.loading || this.exhausted) return this.loading;
     if (this.minutes.length - this.ci > 3000) return null;
-    const last = this.minutes[this.minutes.length - 1];
-    this.loading = this.loadMore(last.t + 5000 * MIN)
+    this.loading = this.loadMore(this.cursor + 4 * DAY)
       .catch(() => undefined)
       .finally(() => (this.loading = null));
     return this.loading;

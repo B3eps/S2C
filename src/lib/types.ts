@@ -40,6 +40,8 @@ export interface Position {
   sl?: number;
   tp?: number;
   initialSl?: number;
+  /** set once the first stop is committed; until then initialSl follows the stop */
+  riskLocked?: boolean;
   openedAt: number; // replay ms
   orderType: OrderType;
   shotOpen?: string;

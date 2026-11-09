@@ -6,10 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "start": "vite build && vite preview --port 5199 --strictPort"
   },
   "dependencies": {
     "@fontsource-variable/archivo": "^5.3.0",
+    "dukascopy-node": "^1.51.1",
     "idb": "^8.0.4",
     "lightweight-charts": "^5.2.1",
     "react": "^18.3.1",

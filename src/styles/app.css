@@ -918,7 +918,7 @@ table.tbl {
   pointer-events: none;
   overflow: hidden;
 }
-.chart-overlay svg {
+.chart-overlay > svg {
   position: absolute;
   inset: 0;
   width: 100%;
