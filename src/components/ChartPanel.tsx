@@ -156,6 +156,7 @@ export function ChartPanel({ index }: { index: number }) {
   const setPane = useApp((s) => s.setPane);
   const tool = useApp((s) => s.tool);
   const showPrice = useApp((s) => s.showPrice);
+  const editLine = useApp((s) => s.editing);
   const session = useApp((s) => s.session);
   const sessionTrades = useApp((s) => s.sessionTrades);
   const pane = prefs.panes[index];
@@ -317,20 +318,25 @@ export function ChartPanel({ index }: { index: number }) {
   };
 
   // ── line drag ──
+  const moved = useRef(false);
   const startDrag = (l: OLine) => (e: React.PointerEvent) => {
+    moved.current = false;
     if (!l.draggable || e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
     const el = e.currentTarget as HTMLElement;
     el.setPointerCapture(e.pointerId);
+    const y0 = e.clientY;
     const move = (ev: PointerEvent) => {
+      if (!moved.current && Math.abs(ev.clientY - y0) < 3) return;
+      moved.current = true;
       const p = ctrlRef.current?.yToPrice(localXY(ev).y);
       if (p != null) S().moveLine(l.target, p);
     };
     const up = () => {
       el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerup', up);
-      S().commitLine();
+      if (moved.current) S().commitLine();
     };
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', up);
@@ -717,7 +723,15 @@ export function ChartPanel({ index }: { index: number }) {
               return (
                 <div key={l.key} className={`oline ${l.cls}`} style={{ transform: `translateY(${y}px)`, right: scaleW }}>
                   {l.draggable && <div className="hit" onPointerDown={startDrag(l)} />}
-                  <div className="tag" onPointerDown={startDrag(l)}>
+                  <div
+                    className={`tag ${editLine && editLine.id === l.target.id && l.target.kind !== 'ticket' ? 'sel' : ''}`}
+                    onPointerDown={startDrag(l)}
+                    onClick={() => {
+                      if (moved.current || l.target.kind === 'ticket' || !l.target.id) return;
+                      S().selectLine({ kind: l.target.kind, id: l.target.id });
+                    }}
+                    title={l.target.kind !== 'ticket' ? 'Düzenlemek için tıkla, taşımak için sürükle' : undefined}
+                  >
                     <span className="k">{l.k}</span>
                     <span className="v">{showPrice ? `${l.v} · ${goldPrice(l.price)}` : l.v}</span>
                     {l.missing?.map((f) => (

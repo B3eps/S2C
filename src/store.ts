@@ -128,6 +128,7 @@ interface State {
   dataWait: boolean;
   tool: Tool;
   ticket: Ticket | null;
+  editing: { kind: 'order' | 'pos'; id: string } | null;
   overlay: Overlay | null;
   notices: Notice[];
   replayTradeId: string | null;
@@ -154,6 +155,8 @@ interface State {
   submitTicket(): void;
   cancelTicket(): void;
   cancelOrder(id: string): void;
+  selectLine(t: { kind: 'order' | 'pos'; id: string } | null): void;
+  setOrderLots(id: string, lots: number): void;
   closePosition(id: string): void;
   moveLine(target: LineTarget, price: number): void;
   clearLevel(target: LineTarget): void;
@@ -460,6 +463,7 @@ export const useApp = create<State>((set, get) => {
         s.orders = s.orders.filter((x) => x.id !== o.id);
         const p = openPos(o.side, o.lots, fill, o.sl, o.tp, o.type, at);
         p.openedAt = m.t;
+        if (get().editing?.id === o.id) set({ editing: { kind: 'pos', id: p.id } });
       }
     }
 
@@ -562,6 +566,7 @@ export const useApp = create<State>((set, get) => {
     dataWait: false,
     tool: 'cursor',
     ticket: null,
+    editing: null,
     overlay: null,
     notices: [],
     showPrice: false,
@@ -720,6 +725,7 @@ export const useApp = create<State>((set, get) => {
         sessions: get().sessions.map((x) => (x.id === s.id ? { ...s } : x)),
         session: null,
         ticket: null,
+    editing: null,
         sessionTrades: [],
         overlay,
         notices: [...get().notices, notice].slice(-3),
@@ -835,7 +841,7 @@ export const useApp = create<State>((set, get) => {
         manualLots: lastTicket.manualLots,
         useRisk: lastTicket.useRisk,
       };
-      set({ ticket: t });
+      set({ ticket: t, editing: null });
     },
 
     updateTicket(p) {
@@ -886,7 +892,21 @@ export const useApp = create<State>((set, get) => {
       set({ ticket: null });
     },
 
+    selectLine(t) {
+      set({ editing: t, ticket: t ? null : get().ticket });
+    },
+
+    setOrderLots(id, lots) {
+      const s = get().session;
+      const o = s?.orders.find((x) => x.id === id);
+      if (!s || !o) return;
+      o.lots = roundLots(lots);
+      set({ session: { ...s } });
+      persistSession(s);
+    },
+
     cancelOrder(id) {
+      if (get().editing?.id === id) set({ editing: null });
       const s = get().session;
       if (!s) return;
       s.orders = s.orders.filter((o) => o.id !== id);
@@ -896,6 +916,7 @@ export const useApp = create<State>((set, get) => {
     },
 
     closePosition(id) {
+      if (get().editing?.id === id) set({ editing: null });
       const s = get().session;
       const p = s?.positions.find((x) => x.id === id);
       if (!s || !p || !feed) return;

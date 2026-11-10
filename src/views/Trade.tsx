@@ -144,8 +144,10 @@ function OrderPanel() {
   const session = useApp((s) => s.session);
   const live = useApp((s) => s.live);
   const S = useApp.getState;
+  const editing = useApp((s) => s.editing);
   if (!account || !session) return <div className="order" />;
   const lim = accountLimits(account, session);
+  const edited = editing ? (editing.kind === 'order' ? session.orders.find((o) => o.id === editing.id) : session.positions.find((p) => p.id === editing.id)) : undefined;
 
   const side = ticket?.side;
   const entry = ticket ? (ticket.type === 'market' ? live.price : ticket.entry) : 0;
@@ -178,7 +180,9 @@ function OrderPanel() {
         )}
       </div>
 
-      {ticket && (
+      {edited && editing && <EditPanel kind={editing.kind} id={editing.id} />}
+
+      {ticket && !edited && (
         <>
           <div className="order-sec">
             <div className="seg" role="group" aria-label="Emir tipi" style={{ width: '100%' }}>
@@ -364,6 +368,127 @@ function OrderPanel() {
   );
 }
 
+
+/** Edit a placed order or an open position: size, SL/TP on or off, cancel/close. Prices move by dragging on the chart. */
+function EditPanel({ kind, id }: { kind: 'order' | 'pos'; id: string }) {
+  const session = useApp((s) => s.session)!;
+  const account = useApp((s) => s.accounts.find((a) => a.id === s.session?.accountId))!;
+  const live = useApp((s) => s.live);
+  const S = useApp.getState;
+  const o = kind === 'order' ? session.orders.find((x) => x.id === id) : undefined;
+  const p = kind === 'pos' ? session.positions.find((x) => x.id === id) : undefined;
+  const h = o ?? p;
+  if (!h) return null;
+  const entry = o ? o.price : p!.entry;
+  const lotsNow = h.lots;
+  const riskSl = p ? p.initialSl ?? p.sl : o!.sl;
+  const risk = riskOf(entry, riskSl, lotsNow);
+  const reward = h.tp !== undefined ? Math.abs(pnlOf(h.side, entry, h.tp, lotsNow)) : undefined;
+  const rr = risk && reward ? reward / risk : undefined;
+  const target = { kind, id } as const;
+  const toggle = (field: 'sl' | 'tp') => {
+    if (h[field] !== undefined) S().clearLevel({ ...target, field });
+    else {
+      S().placeLevel({ ...target, field });
+      S().commitLine();
+    }
+  };
+  const sideName = h.side === 'long' ? 'Long' : 'Short';
+  return (
+    <>
+      <div className="order-sec">
+        <div className="edit-head">
+          <span className={`side-tag ${h.side}`}>
+            <Icon name={h.side === 'long' ? 'up' : 'down'} size={16} />
+          </span>
+          <h2>{o ? `${sideName} ${o.type === 'limit' ? 'limit' : 'stop'} emri` : `${sideName} pozisyon`}</h2>
+          <button className="icon-btn sm" title="Kapat" onClick={() => S().selectLine(null)}>
+            <Icon name="close" size={14} />
+          </button>
+        </div>
+        <div className="hint-line">Giriş, SL ve TP çizgilerini grafikte sürükleyerek fiyatlarını değiştir.</div>
+      </div>
+      <div className="order-sec">
+        <div className="level-toggles">
+          <label className="check">
+            <input type="checkbox" checked={h.sl !== undefined} onChange={() => toggle('sl')} />
+            Zarar durdur (SL)
+          </label>
+          <label className="check">
+            <input type="checkbox" checked={h.tp !== undefined} onChange={() => toggle('tp')} />
+            Kâr al (TP)
+          </label>
+        </div>
+        {o ? (
+          <>
+            <label className="field">
+              <span>Lot</span>
+              <input
+                className="input"
+                type="number"
+                step={0.01}
+                min={0.01}
+                value={o.lots}
+                onChange={(e) => S().setOrderLots(o.id, Math.max(0.01, parseFloat(e.target.value) || 0.01))}
+                onBlur={() => S().commitLine()}
+              />
+            </label>
+            {o.sl !== undefined && (
+              <div className="field">
+                <span>Lotu riske göre ayarla (hesabın %)</span>
+                <div className="preset-row">
+                  {[0.25, 0.5, 1, 2].map((pc) => (
+                    <button
+                      key={pc}
+                      onClick={() => {
+                        S().setOrderLots(o.id, (account.balance * pc) / 100 / (Math.abs(o.price - o.sl!) * 100));
+                        S().commitLine();
+                      }}
+                    >
+                      %{String(pc).replace('.', ',')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <dl className="kv">
+            <dt>Lot</dt>
+            <dd>{fmtLots(p!.lots)}</dd>
+            <dt>Açık K/Z</dt>
+            <dd className={pnlOf(p!.side, p!.entry, live.price, p!.lots) >= 0 ? 'up' : 'down'}>{signedMoney(pnlOf(p!.side, p!.entry, live.price, p!.lots))}</dd>
+          </dl>
+        )}
+      </div>
+      <div className="order-sec">
+        <dl className="kv">
+          <dt>Risk</dt>
+          <dd>{risk !== undefined ? `${money(risk)} · %${((risk / account.balance) * 100).toFixed(2).replace('.', ',')}` : 'Sınırsız (SL yok)'}</dd>
+          <dt>Hedef kazanç</dt>
+          <dd>{reward !== undefined ? money(reward) : '—'}</dd>
+          <dt>Risk / ödül</dt>
+          <dd>{rr ? `1 : ${rr.toFixed(2).replace('.', ',')}` : '—'}</dd>
+        </dl>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <button className="btn" onClick={() => S().selectLine(null)}>
+            Bitti
+          </button>
+          {o ? (
+            <button className="btn danger" onClick={() => S().cancelOrder(o.id)}>
+              Emri sil
+            </button>
+          ) : (
+            <button className="btn danger" onClick={() => S().closePosition(p!.id)}>
+              Pozisyonu kapat
+            </button>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 function Dock() {
   const [tab, setTab] = useState<'pos' | 'orders' | 'history'>('pos');
   const session = useApp((s) => s.session)!;
@@ -372,6 +497,7 @@ function Dock() {
   const dataWait = useApp((s) => s.dataWait);
   const prefs = useApp((s) => s.prefs);
   const live = useApp((s) => s.live);
+  const editing = useApp((s) => s.editing);
   const S = useApp.getState;
   return (
     <div className="dock">
@@ -429,7 +555,7 @@ function Dock() {
                   const slR = p.sl !== undefined && risk ? pnlOf(p.side, p.entry, p.sl, p.lots) / risk : undefined;
                   const tpR = p.tp !== undefined && risk ? pnlOf(p.side, p.entry, p.tp, p.lots) / risk : undefined;
                   return (
-                    <tr key={p.id}>
+                    <tr key={p.id} className={`clickable ${editing?.id === p.id ? 'sel' : ''}`} onClick={() => S().selectLine({ kind: 'pos', id: p.id })}>
                       <td>
                         <span className={`side-tag ${p.side}`}>
                           <Icon name={p.side === 'long' ? 'up' : 'down'} size={14} /> {p.side === 'long' ? 'Long' : 'Short'}
@@ -470,7 +596,7 @@ function Dock() {
               </thead>
               <tbody>
                 {session.orders.map((o) => (
-                  <tr key={o.id}>
+                  <tr key={o.id} className={`clickable ${editing?.id === o.id ? 'sel' : ''}`} onClick={() => S().selectLine({ kind: 'order', id: o.id })}>
                     <td>
                       <span className={`side-tag ${o.side}`}>
                         <Icon name={o.side === 'long' ? 'up' : 'down'} size={14} /> {o.side === 'long' ? 'Long' : 'Short'}

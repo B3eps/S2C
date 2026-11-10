@@ -2238,3 +2238,19 @@ table.tbl {
 
 .pkg:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
 .pkg:disabled .cert { box-shadow: none; }
+
+.oline .tag.sel {
+  box-shadow: 0 0 0 1.5px var(--ink-1), 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+.oline .tag { cursor: pointer; }
+.edit-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.edit-head h2 { flex: 1; }
+.dock .tbl tr.sel td { background: var(--ply-3); }
+
+.stat-grid.money { grid-template-columns: repeat(3, 1fr); }
+.stat-grid.money .stat:nth-child(3) { border-right: 0; }
+.stat-grid.money .stat { border-bottom: 0; }

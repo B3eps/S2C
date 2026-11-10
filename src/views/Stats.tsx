@@ -15,6 +15,9 @@ export function Stats() {
     [trades, acct, withArchived, archived],
   );
   const s = useMemo(() => summarize(list), [list]);
+  const accts = accounts.filter((a) => (acct === 'all' ? withArchived || !a.archived : a.id === acct));
+  const spent = accts.reduce((x, a) => x + (a.fee ?? 0), 0);
+  const earned = accts.reduce((x, a) => x + a.payouts.reduce((y, p) => y + p.amount, 0), 0);
   const longs = list.filter((t) => t.side === 'long');
   const shorts = list.filter((t) => t.side === 'short');
   const sl = summarize(longs);
@@ -54,6 +57,20 @@ export function Stats() {
         </select>
       </div>
       <div className="page-body">
+        <div className="stat-grid money">
+          <div className="stat">
+            <span className="k">Harcanan (hesap alımları)</span>
+            <span className="v down">{money(spent)}</span>
+          </div>
+          <div className="stat">
+            <span className="k">Kazanılan (çekilen ödemeler)</span>
+            <span className="v up">{money(earned)}</span>
+          </div>
+          <div className="stat">
+            <span className="k">Net</span>
+            <span className={`v ${earned - spent > 0 ? 'up' : earned - spent < 0 ? 'down' : ''}`}>{signedMoney(earned - spent)}</span>
+          </div>
+        </div>
         <div className="stat-grid">
           {stats.map(([k, v, c]) => (
             <div key={k} className="stat">
