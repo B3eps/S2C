@@ -89,6 +89,8 @@ export interface Rules {
   minDayPct?: number;
   /** smallest payout, in trader share dollars */
   payoutMinUsd?: number;
+  /** payout provider's percentage fee, charged against the user's reward share */
+  payoutFeePct?: number;
   /** commission, % of notional per side */
   commissionPct?: number;
   /** day start reference at 22:00 UTC: higher of equity/balance, or balance only */

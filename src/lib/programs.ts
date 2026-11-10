@@ -25,7 +25,7 @@ export interface Program {
   rules: Rules;
 }
 
-const base = { rulesVersion: '2026-11-10', split: 80, payoutMin: 0, payoutMinUsd: 150, commissionPct: 0.001 };
+const base = { rulesVersion: '2026-11-10', split: 80, payoutMin: 0, payoutMinUsd: 150, payoutFeePct: 2, commissionPct: 0.001 };
 
 export const PROGRAMS: Program[] = [
   {
@@ -106,6 +106,7 @@ export const PROGRAMS: Program[] = [
 ];
 
 export const salePrice = (list: number) => Math.round(list * (1 - DISCOUNT) * 100) / 100;
+export const payoutNet = (gross: number, split: number, feePct = 0) => gross * (split / 100) * (1 - feePct / 100);
 
 /** Profit targets per step; old accounts only carry `target`. */
 export const stepTargets = (r: Rules) => (r.targets && r.targets.length ? r.targets : [r.target]);

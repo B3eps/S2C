@@ -10,6 +10,7 @@ const exec = await load('src/lib/execution.ts');
 const stats = await load('src/lib/stats.ts');
 const calendar = await load('src/lib/calendar.ts');
 const backup = await load('src/lib/db.ts');
+const programs = await load('src/lib/programs.ts');
 const bar = { t: 0, o: 100, h: 110, l: 90, c: 104, v: 1 };
 const pos = { side: 'long', sl: 95, tp: 108 };
 
@@ -35,6 +36,10 @@ test('short stop emri ve short stop kapanışı', () => {
 test('istatistik net sonuç, kazanma oranı ve düşüşü hesaplar', () => {
   const s = stats.summarize([{ pnl: 100, r: 1, realClosedAt: 1 }, { pnl: -40, r: -1, realClosedAt: 2 }]);
   assert.equal(s.net, 60); assert.equal(s.winRate, 50); assert.equal(s.maxDD, 40); assert.equal(s.profitFactor, 2.5);
+});
+test('BEM ödülü %2 işlem kesintisini düşürür ve eski kural kaydı varsayılan olarak korunur', () => {
+  assert.equal(programs.payoutNet(1000, 80, 2), 784);
+  assert.equal(programs.payoutNet(1000, 80), 800);
 });
 test('takvim gerçek NFP ve CPI tarihlerini ve yaz saatini kullanır', () => {
   const events = calendar.eventsBetween(Date.UTC(2025, 0, 1), Date.UTC(2025, 0, 31));

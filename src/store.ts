@@ -4,7 +4,7 @@ import { store as db } from './lib/db';
 import { play, configureSound } from './lib/sound';
 import { atr } from './lib/indicators';
 import { money0 } from './lib/format';
-import { PROGRAMS, propDay, salePrice, stepTargets } from './lib/programs';
+import { PROGRAMS, payoutNet, propDay, salePrice, stepTargets } from './lib/programs';
 import { pendingFill, positionExit, riskLots, worstEquity } from './lib/execution';
 import type { ActiveInd } from './lib/indicators';
 import {
@@ -1085,7 +1085,7 @@ export const useApp = create<State>((set, get) => {
         return;
       }
       const gross = a.balance - a.size - lim.buffer;
-      const amount = (gross * a.rules.split) / 100;
+      const amount = payoutNet(gross, a.rules.split, a.rules.payoutFeePct ?? 0);
       a.payouts = [...a.payouts, { id: uid(), accountId: a.id, gross, amount, at: Date.now() }];
       a.balance = a.size + lim.buffer;
       a.payoutDays = [];
