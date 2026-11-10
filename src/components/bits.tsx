@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Account, SessionRec, Trade } from '../lib/types';
-import { accountLimits } from '../store';
+import { accountLimits, countedDays, passBlocker } from '../store';
 import { money, money0, pct, plainPct, sizeLabel } from '../lib/format';
 import { heatGrid, HeatMetric, WEEKDAYS } from '../lib/stats';
 import { C } from '../lib/theme';
@@ -53,10 +53,12 @@ export function RuleGauges({ a, s, equity }: { a: Account; s: SessionRec | null;
   const dayUsed = Math.max(0, dayStart - equity);
   const maxRoom = a.size - lim.maxFloor;
   const maxUsed = Math.max(0, a.size - equity);
-  const days = new Set(a.tradingDays).size;
+  const days = countedDays(a);
+  const blocker = passBlocker(a, s?.positions.length ?? 0);
+  const stepName = lim.steps > 1 ? `Aşama ${lim.step + 1} hedefi` : 'Hedef';
   const goal =
     a.phase === 'challenge'
-      ? { name: 'Hedef', ratio: (a.balance - a.size) / (lim.target - a.size), value: `${pct(((a.balance - a.size) / a.size) * 100, 2)} / %${a.rules.target}` }
+      ? { name: stepName, ratio: (a.balance - a.size) / (lim.target - a.size), value: blocker ?? `${pct(((a.balance - a.size) / a.size) * 100, 2)} / %${String(lim.targetPct).replace('.', ',')}` }
       : { name: 'Ödeme eşiği', ratio: (a.balance - a.size) / (lim.payoutAt - a.size), value: `${pct(((a.balance - a.size) / a.size) * 100, 2)} / %${a.rules.payoutMin}` };
   return (
     <>
@@ -67,7 +69,7 @@ export function RuleGauges({ a, s, equity }: { a: Account; s: SessionRec | null;
         kind="goal"
         ratio={goal.ratio}
         value={goal.value}
-        sub={a.phase === 'challenge' ? `İşlem günü: ${days} / ${a.rules.minDays}` : undefined}
+        sub={a.phase === 'challenge' ? `${a.rules.minDayPct ? 'Kârlı gün' : 'İşlem günü'}: ${days} / ${a.rules.minDays}` : undefined}
       />
     </>
   );
@@ -78,8 +80,10 @@ export function CertLabel({ a, compact, className = '', stampAnim }: { a: Accoun
   const growth = ((a.balance - a.size) / a.size) * 100;
   const voidAcc = a.status === 'violated';
   const funded = a.phase === 'funded' && !voidAcc;
-  const days = new Set(a.tradingDays).size;
+  const days = countedDays(a);
   const paid = a.payouts.reduce((s, p) => s + p.amount, 0);
+  const lim = accountLimits(a, null);
+  const phaseText = a.phase === 'funded' ? 'Fonlu' : lim.steps > 1 ? `Aşama ${lim.step + 1}/${lim.steps}` : 'Değerlendirme';
   return (
     <div
       className={`cert ${funded ? 'funded' : ''} ${voidAcc ? 'void' : ''} ${compact ? 'compact' : ''} ${className}`}
@@ -107,9 +111,15 @@ export function CertLabel({ a, compact, className = '', stampAnim }: { a: Accoun
             <div className="cert-top">
               <span>XAUUSD</span>
               <span className="sep" />
-              <span>{sizeLabel(a.size)} hesap</span>
+              <span>{sizeLabel(a.size)}</span>
+              {a.programName && (
+                <>
+                  <span className="sep" />
+                  <span>{a.programName}</span>
+                </>
+              )}
               <span className="sep" />
-              <span>{a.phase === 'challenge' ? 'Değerlendirme' : 'Fonlu'}</span>
+              <span>{phaseText}</span>
             </div>
             <div className="cert-no">{a.no}</div>
             <div className="cert-meta">
@@ -118,7 +128,7 @@ export function CertLabel({ a, compact, className = '', stampAnim }: { a: Accoun
               </span>
               {a.phase === 'challenge' ? (
                 <span>
-                  İşlem günü <b>{days}</b> / {a.rules.minDays}
+                  {a.rules.minDayPct ? 'Kârlı gün' : 'İşlem günü'} <b>{days}</b> / {a.rules.minDays}
                 </span>
               ) : (
                 <span>
@@ -147,7 +157,7 @@ export function CertLabel({ a, compact, className = '', stampAnim }: { a: Accoun
             <span className="g-value" style={{ color: growth < 0 ? '#b23a2a' : undefined }}>
               {pct(growth, compact ? 1 : 2)}
             </span>
-            {!compact && <span className="g-sub">hedef %{a.rules.target}</span>}
+            {!compact && <span className="g-sub">hedef %{String(lim.targetPct).replace('.', ',')}</span>}
           </>
         )}
       </div>

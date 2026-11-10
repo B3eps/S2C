@@ -3,7 +3,8 @@ import { Feed, randomStart } from './lib/feed';
 import { store as db } from './lib/db';
 import { play, configureSound } from './lib/sound';
 import { atr } from './lib/indicators';
-import { dayKeyUtc } from './lib/format';
+import { dayKeyUtc, money0 } from './lib/format';
+import { PROGRAMS, salePrice, stepTargets } from './lib/programs';
 import type { ActiveInd } from './lib/indicators';
 import {
   Account, CONTRACT, CloseReason, DEFAULT_RULES, Drawing, DrawingKind, MIN_LOT, Order, OrderType, Position, Rules,
@@ -70,6 +71,7 @@ export interface Settings {
 
 export type Overlay =
   | { kind: 'funded'; account: Account }
+  | { kind: 'step'; account: Account }
   | { kind: 'violation'; account: Account; reason: string }
   | { kind: 'payout'; account: Account; amount: number; gross: number }
 ;
@@ -80,7 +82,7 @@ export interface Notice {
   session: SessionRec;
   trades: Trade[];
   account: Account;
-  reason: 'user' | 'violation' | 'funded' | 'data';
+  reason: 'user' | 'violation' | 'funded' | 'step' | 'data';
 }
 
 export interface ChartPrefs {
@@ -127,9 +129,10 @@ interface State {
 
   boot(): Promise<void>;
   go(v: View): void;
-  createAccount(size: number): Promise<void>;
+  createAccount(size: number, programId?: string): Promise<void>;
+  archiveAccount(id: string, archived: boolean): Promise<void>;
   startSession(accountId: string): Promise<void>;
-  endSession(reason?: 'user' | 'violation' | 'funded' | 'data'): Promise<void>;
+  endSession(reason?: Notice['reason']): Promise<void>;
   stepBar(): void;
   stepMinutes(n: number): void;
   setPlaying(p: boolean): void;
@@ -182,11 +185,36 @@ export function deriveType(side: Side, entry: number, price: number): 'limit' | 
 
 export function accountLimits(a: Account, s: SessionRec | null) {
   const size = a.size;
+  const targets = stepTargets(a.rules);
+  const step = Math.min(a.step ?? 0, targets.length - 1);
   const dayFloor = (s?.dayStartEquity ?? a.balance) - (size * a.rules.dailyLoss) / 100;
   const maxFloor = size * (1 - a.rules.maxLoss / 100);
-  const target = size * (1 + a.rules.target / 100);
-  const payoutAt = size * (1 + a.rules.payoutMin / 100);
-  return { dayFloor, maxFloor, target, payoutAt };
+  const targetPct = targets[step];
+  const target = size * (1 + targetPct / 100);
+  const minGross = (a.rules.payoutMinUsd ?? 0) / (a.rules.split / 100);
+  const payoutAt = Math.max(size * (1 + a.rules.payoutMin / 100), size + minGross, size + 0.01);
+  return { dayFloor, maxFloor, target, targetPct, step, steps: targets.length, payoutAt };
+}
+
+/** Days that count toward the minimum: profitable days when the program asks for them, else any traded day. */
+export function countedDays(a: Account) {
+  const pct = a.rules.minDayPct ?? 0;
+  if (!pct) return new Set(a.tradingDays).size;
+  const need = (a.size * pct) / 100;
+  return Object.values(a.dayPnl ?? {}).filter((v) => v >= need).length;
+}
+
+/** Why a reached target has not passed yet, or null when it can pass now. */
+export function passBlocker(a: Account, openPositions: number): string | null {
+  const lim = accountLimits(a, null);
+  if (a.phase !== 'challenge' || a.status !== 'active' || a.balance < lim.target) return null;
+  const days = countedDays(a);
+  if (days < a.rules.minDays) {
+    const left = a.rules.minDays - days;
+    return a.rules.minDayPct ? `Hedef tamam · ${left} kârlı gün daha (günde en az %${String(a.rules.minDayPct).replace('.', ',')})` : `Hedef tamam · ${left} işlem günü daha`;
+  }
+  if (openPositions) return 'Hedef tamam · açık pozisyonları kapat';
+  return null;
 }
 
 const persistSession = (() => {
@@ -199,9 +227,9 @@ const persistSession = (() => {
   };
 })();
 
-const accountNo = () => {
-  const n = Math.floor(100000 + Math.random() * 899999);
-  return `S2C-${n}`;
+const accountNo = (existing: Account[]) => {
+  const n = existing.reduce((m, a) => Math.max(m, parseInt(a.no.replace(/^S2C-/, ''), 10) || 0), 0);
+  return `S2C-${n + 1}`;
 };
 
 const DEFAULT_PREFS: ChartPrefs = {
@@ -292,8 +320,11 @@ export const useApp = create<State>((set, get) => {
   const closePos = (p: Position, exit: number, reason: CloseReason, at: number) => {
     const s = get().session!;
     const a = account()!;
-    const pnl = pnlOf(p.side, p.entry, exit, p.lots);
+    const commission = (((p.entry + exit) * p.lots * CONTRACT) * (a.rules.commissionPct ?? 0)) / 100;
+    const pnl = pnlOf(p.side, p.entry, exit, p.lots) - commission;
     const risk = riskOf(p.entry, p.initialSl, p.lots);
+    const dk = `${s.id}:${dayKeyUtc(at - 60_000)}`;
+    a.dayPnl = { ...(a.dayPnl ?? {}), [dk]: (a.dayPnl?.[dk] ?? 0) + pnl };
     const trade: Trade = {
       id: p.id,
       accountId: a.id,
@@ -429,23 +460,31 @@ export const useApp = create<State>((set, get) => {
       get().showToast('Toplam zarar limitinin %80’ine ulaştın.', 'warn');
     }
 
-    // challenge passed
-    if (
-      a.phase === 'challenge' &&
-      a.balance >= lim.target &&
-      s.positions.length === 0 &&
-      new Set(a.tradingDays).size >= a.rules.minDays
-    ) {
-      s.orders = [];
+    if (tryPass()) return false;
+    return true;
+  };
+
+  /** Complete the current step when its target, days and flat book are all met. */
+  const tryPass = (): boolean => {
+    const s = get().session;
+    const a = account();
+    if (!s || !a || a.phase !== 'challenge' || a.status !== 'active') return false;
+    const lim = accountLimits(a, s);
+    if (a.balance < lim.target || s.positions.length || countedDays(a) < a.rules.minDays) return false;
+    s.orders = [];
+    const last = lim.step >= lim.steps - 1;
+    a.balance = a.size;
+    a.tradingDays = [];
+    a.dayPnl = {};
+    if (last) {
       a.phase = 'funded';
       a.fundedAt = Date.now();
-      a.balance = a.size;
-      a.tradingDays = [];
-      saveAccount(a);
-      play('funded');
-      get().endSession('funded');
-      return false;
+    } else {
+      a.step = lim.step + 1;
     }
+    saveAccount(a);
+    play('funded');
+    get().endSession(last ? 'funded' : 'step');
     return true;
   };
 
@@ -489,6 +528,14 @@ export const useApp = create<State>((set, get) => {
         db.kv<Settings>('settings'),
         db.kv<ChartPrefs>('prefs'),
       ]);
+      if (accounts.some((a) => /^S2C-\d{6}$/.test(a.no))) {
+        [...accounts]
+          .sort((x, y) => x.createdAt - y.createdAt)
+          .forEach((a, i) => {
+            a.no = `S2C-${i + 1}`;
+            db.putAccount(a);
+          });
+      }
       const st = { ...get().settings, ...(settings ?? {}) };
       configureSound({ enabled: st.sound, volume: st.volume, barTick: st.barTick });
       set({
@@ -519,18 +566,24 @@ export const useApp = create<State>((set, get) => {
       }
     },
 
-    async createAccount(size) {
+    async createAccount(size, programId) {
+      const prog = PROGRAMS.find((p) => p.id === programId);
       const a: Account = {
         id: uid(),
-        no: accountNo(),
+        no: accountNo(get().accounts),
         size,
         phase: 'challenge',
         status: 'active',
         createdAt: Date.now(),
         balance: size,
-        rules: { ...get().settings.rules },
+        rules: { ...(prog ? prog.rules : get().settings.rules) },
         tradingDays: [],
         payouts: [],
+        step: 0,
+        programId: prog?.id ?? 'custom',
+        programName: prog?.name ?? 'Özel program',
+        fee: prog ? salePrice(prog.prices[size] ?? 0) : 0,
+        dayPnl: {},
       };
       await db.putAccount(a);
       set({ accounts: [a, ...get().accounts] });
@@ -598,6 +651,7 @@ export const useApp = create<State>((set, get) => {
         for (const p of [...s.positions]) closePos(p, feed.price, 'session', feed.clock);
         s.orders = [];
         saveAccount(a);
+        if (tryPass()) return;
       }
       s.clockMs = feed.clock;
       s.endedAt = Date.now();
@@ -607,6 +661,7 @@ export const useApp = create<State>((set, get) => {
       let overlay: Overlay | null = null;
       if (reason === 'violation') overlay = { kind: 'violation', account: { ...a }, reason: a.violation ?? '' };
       if (reason === 'funded') overlay = { kind: 'funded', account: { ...a } };
+      if (reason === 'step') overlay = { kind: 'step', account: { ...a } };
       const notice: Notice = { id: uid(), session: { ...s }, trades, account: { ...a }, reason };
       // screenshots are taken from the chart, so let them finish before it unmounts
       await new Promise((r) => setTimeout(r, 400));
@@ -685,7 +740,7 @@ export const useApp = create<State>((set, get) => {
         while (acc >= 1 && guard++ < 64) {
           acc -= 1;
           get().stepBar();
-          if (!get().session || get().overlay?.kind === 'violation' || get().overlay?.kind === 'funded') {
+          if (!get().session || get().overlay?.kind === 'violation' || get().overlay?.kind === 'funded' || get().overlay?.kind === 'step') {
             set({ playing: false });
             return;
           }
@@ -791,19 +846,8 @@ export const useApp = create<State>((set, get) => {
       set({ session: { ...s }, live: computeLive() });
       runShots();
       persistSession(s, true);
-      // a manual close can complete the challenge target
-      const a = account()!;
-      const lim = accountLimits(a, s);
-      if (a.phase === 'challenge' && a.balance >= lim.target && s.positions.length === 0 && new Set(a.tradingDays).size >= a.rules.minDays) {
-        s.orders = [];
-        a.phase = 'funded';
-        a.fundedAt = Date.now();
-        a.balance = a.size;
-        a.tradingDays = [];
-        saveAccount(a);
-        play('funded');
-        get().endSession('funded');
-      }
+      // a manual close can complete the step
+      tryPass();
     },
 
     moveLine(target, price) {
@@ -934,6 +978,15 @@ export const useApp = create<State>((set, get) => {
       persistSession(s);
     },
 
+    async archiveAccount(id, archived) {
+      const a = get().accounts.find((x) => x.id === id);
+      if (!a) return;
+      if (archived && get().session?.accountId === id) await get().endSession('user');
+      const next = { ...a, archived };
+      await db.putAccount(next);
+      set({ accounts: get().accounts.map((x) => (x.id === id ? next : x)) });
+    },
+
     async requestPayout(accountId) {
       const a = get().accounts.find((x) => x.id === accountId);
       if (!a || a.phase !== 'funded' || a.status !== 'active') return;
@@ -943,7 +996,10 @@ export const useApp = create<State>((set, get) => {
         return;
       }
       const lim = accountLimits(a, null);
-      if (a.balance < lim.payoutAt) return;
+      if (a.balance < lim.payoutAt) {
+        get().showToast(`Ödeme için bakiye en az ${money0(lim.payoutAt)} olmalı.`, 'warn');
+        return;
+      }
       const gross = a.balance - a.size;
       const amount = (gross * a.rules.split) / 100;
       a.payouts = [...a.payouts, { id: uid(), accountId: a.id, gross, amount, at: Date.now() }];

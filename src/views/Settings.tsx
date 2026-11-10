@@ -67,7 +67,7 @@ export function Settings() {
                     min={min}
                     max={max}
                     step={step}
-                    value={rules[k]}
+                    value={rules[k] as number}
                     onChange={(e) => {
                       const v = parseFloat(e.target.value);
                       if (Number.isFinite(v)) setRules({ ...rules, [k]: Math.max(min, Math.min(max, v)) });

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useApp, SPEEDS, ticketLots, riskOf, pnlOf, accountLimits } from '../store';
+import { useApp, SPEEDS, ticketLots, riskOf, pnlOf, accountLimits, countedDays, passBlocker } from '../store';
 import { ChartPanel } from '../components/ChartPanel';
 import { CertLabel, CountUp, RuleGauges } from '../components/bits';
 import { Icon } from '../components/Icon';
@@ -335,13 +335,13 @@ function OrderPanel() {
           </dd>
           {account.phase === 'challenge' ? (
             <>
-              <dt>Kâr hedefi</dt>
+              <dt>{lim.steps > 1 ? `Aşama ${lim.step + 1}/${lim.steps} hedefi` : 'Kâr hedefi'}</dt>
               <dd>
-                %{account.rules.target} · {money0(lim.target)}
+                %{String(lim.targetPct).replace('.', ',')} · {money0(lim.target)}
               </dd>
-              <dt>Asgari işlem günü</dt>
+              <dt>{account.rules.minDayPct ? 'Kârlı gün' : 'İşlem günü'}</dt>
               <dd>
-                {new Set(account.tradingDays).size} / {account.rules.minDays}
+                {countedDays(account)} / {account.rules.minDays}
               </dd>
             </>
           ) : (
@@ -358,6 +358,8 @@ function OrderPanel() {
           )}
         </dl>
         {account.phase === 'funded' && <div className="hint-line">Fonlu hesapta zarar limitleri aynen geçerli. Aşılırsa hesap kapanır.</div>}
+        {passBlocker(account, session.positions.length) && <div className="hint-line warn-c">{passBlocker(account, session.positions.length)}</div>}
+        {!!account.rules.commissionPct && <div className="hint-line">Komisyon %{String(account.rules.commissionPct).replace('.', ',')} / yön, kâr ve zarara dahil.</div>}
         {account.phase === 'funded' && (
           <button className="btn" disabled={account.balance < lim.payoutAt || session.positions.length > 0} onClick={() => S().requestPayout(account.id)}>
             <Icon name="coin" size={16} /> Ödeme iste

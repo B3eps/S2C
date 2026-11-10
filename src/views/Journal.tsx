@@ -36,9 +36,13 @@ export function Journal() {
   const selId = useApp((s) => s.journalTradeId);
   const S = useApp.getState;
   const [acct, setAcct] = useState<string>('all');
+  const archived = useMemo(() => new Set(accounts.filter((a) => a.archived).map((a) => a.id)), [accounts]);
   const list = useMemo(
-    () => trades.filter((t) => acct === 'all' || t.accountId === acct).sort((a, b) => b.realClosedAt - a.realClosedAt),
-    [trades, acct],
+    () =>
+      trades
+        .filter((t) => (acct === 'all' ? !archived.has(t.accountId) : acct === 'archived' ? archived.has(t.accountId) : t.accountId === acct))
+        .sort((a, b) => b.realClosedAt - a.realClosedAt),
+    [trades, acct, archived],
   );
   const sel = list.find((t) => t.id === selId) ?? list[0];
   const [note, setNote] = useState(sel?.note ?? '');
@@ -55,6 +59,7 @@ export function Journal() {
           <div className="grow" />
           <select className="input" style={{ width: 200 }} value={acct} onChange={(e) => setAcct(e.target.value)} aria-label="Hesap">
             <option value="all">Tüm hesaplar</option>
+            <option value="archived">Arşivdeki hesaplar</option>
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.no}

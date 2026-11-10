@@ -30,6 +30,26 @@ export function Overlays() {
       </div>
     );
 
+  if (o.kind === 'step')
+    return (
+      <div className="moment" role="dialog" aria-label="Aşama geçildi">
+        <div className="moment-card">
+          <Emblem width={120} />
+          <div className="moment-title gold">Aşama {(o.account.step ?? 1)} tamam</div>
+          <p className="lead">
+            {o.account.no} {o.account.step}. aşamayı geçti. Bakiye {o.account.size.toLocaleString('tr-TR')} $ olarak yenilendi; şimdi {(o.account.step ?? 1) + 1}. aşama. Kurallar aynı, hedef
+            değişti.
+          </p>
+          <CertLabel a={o.account} className="seal-in" />
+          <div className="actions">
+            <button className="btn primary lg" onClick={dismiss} autoFocus>
+              Tamam
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+
   if (o.kind === 'violation')
     return (
       <div className="moment violation" role="dialog" aria-label="Hesap ihlal edildi">
@@ -67,7 +87,7 @@ export function Overlays() {
   return null;
 }
 
-const REASON_TAG = { user: null, data: 'Veri bitti', violation: 'İhlal', funded: 'Fonlandı' } as const;
+const REASON_TAG = { user: null, data: 'Veri bitti', violation: 'İhlal', funded: 'Fonlandı', step: 'Aşama geçildi' } as const;
 
 /** Session reports slide in at the bottom right and print row by row; nothing is interrupted. */
 export function Notices() {

@@ -8,7 +8,12 @@ export function Stats() {
   const trades = useApp((s) => s.trades);
   const accounts = useApp((s) => s.accounts);
   const [acct, setAcct] = useState('all');
-  const list = useMemo(() => trades.filter((t) => acct === 'all' || t.accountId === acct), [trades, acct]);
+  const [withArchived, setWithArchived] = useState(false);
+  const archived = useMemo(() => new Set(accounts.filter((a) => a.archived).map((a) => a.id)), [accounts]);
+  const list = useMemo(
+    () => trades.filter((t) => (acct === 'all' ? withArchived || !archived.has(t.accountId) : t.accountId === acct)),
+    [trades, acct, withArchived, archived],
+  );
   const s = useMemo(() => summarize(list), [list]);
   const longs = list.filter((t) => t.side === 'long');
   const shorts = list.filter((t) => t.side === 'short');
@@ -36,6 +41,9 @@ export function Stats() {
       <div className="page-head">
         <h1>İstatistik</h1>
         <div className="grow" />
+        <label className="check">
+          <input type="checkbox" checked={withArchived} onChange={(e) => setWithArchived(e.target.checked)} /> Arşivdekileri dahil et
+        </label>
         <select className="input" style={{ width: 220 }} value={acct} onChange={(e) => setAcct(e.target.value)} aria-label="Hesap">
           <option value="all">Tüm hesaplar</option>
           {accounts.map((a) => (

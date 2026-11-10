@@ -1,63 +1,96 @@
+import { useState } from 'react';
 import { useApp } from '../store';
-import { PACKAGES, Account } from '../lib/types';
-import { money0, sizeLabel } from '../lib/format';
+import { PACKAGES } from '../lib/types';
+import { PROGRAMS, salePrice, stepTargets } from '../lib/programs';
+import { money, money0, sizeLabel } from '../lib/format';
 import { Icon } from '../components/Icon';
 
+const pctTr = (v: number) => '%' + String(v).replace('.', ',');
+
 export function NewAccount() {
-  const rules = useApp((s) => s.settings.rules);
+  const custom = useApp((s) => s.settings.rules);
   const S = useApp.getState;
+  const [pid, setPid] = useState(PROGRAMS[0].id);
+  const prog = PROGRAMS.find((p) => p.id === pid);
+  const rules = prog ? prog.rules : custom;
+  const targets = stepTargets(rules);
+
   return (
     <div className="page">
       <div className="page-head">
         <button className="icon-btn" title="Geri" onClick={() => S().go('dashboard')}>
           <Icon name="chevron" style={{ transform: 'rotate(90deg)' }} />
         </button>
-        <h1>Yeni değerlendirme hesabı</h1>
-        <div className="ledger">
-          <span>
-            Tüm paketlerde <b>{rules.minDays}</b> asgari gün · kâr payı <b>%{rules.split}</b> · ödeme eşiği <b>%{rules.payoutMin}</b>
-          </span>
-        </div>
+        <h1>Yeni hesap</h1>
       </div>
       <div className="pkg-list">
+        <div className="tabs-row" role="tablist">
+          {PROGRAMS.map((p) => (
+            <button key={p.id} className="tab" role="tab" aria-selected={pid === p.id} onClick={() => setPid(p.id)}>
+              {p.name} <span className="count">{p.kind}</span>
+            </button>
+          ))}
+          <button className="tab" role="tab" aria-selected={pid === 'custom'} onClick={() => setPid('custom')}>
+            Özel <span className="count">Ayarlar’dan</span>
+          </button>
+        </div>
+        <div className="program-rules">
+          <span>
+            Hedef <b>{targets.map(pctTr).join(' → ')}</b>
+          </span>
+          <span>
+            Günlük zarar <b>{pctTr(rules.dailyLoss)}</b>
+          </span>
+          <span>
+            Toplam zarar <b>{pctTr(rules.maxLoss)}</b>
+          </span>
+          <span>
+            Asgari gün <b>{rules.minDays}</b>
+            {rules.minDayPct ? ` kârlı (günde ≥ ${pctTr(rules.minDayPct)})` : ''}
+          </span>
+          <span>
+            Kâr payı <b>{pctTr(rules.split)}</b>
+          </span>
+          {rules.payoutMinUsd ? (
+            <span>
+              En az ödeme <b>{money0(rules.payoutMinUsd)}</b>
+            </span>
+          ) : null}
+          {rules.commissionPct ? (
+            <span>
+              Komisyon <b>{pctTr(rules.commissionPct)}</b> / yön
+            </span>
+          ) : null}
+        </div>
         {PACKAGES.map((size) => {
-          const a: Account = {
-            id: 'preview',
-            no: `${sizeLabel(size)} XAU`,
-            size,
-            phase: 'challenge',
-            status: 'active',
-            createdAt: 0,
-            balance: size,
-            rules,
-            tradingDays: [],
-            payouts: [],
-          };
+          const list = prog?.prices[size];
+          const price = list !== undefined ? salePrice(list) : 0;
           return (
-            <button key={size} className="pkg" onClick={() => S().createAccount(size)}>
+            <button key={size} className="pkg" onClick={() => S().createAccount(size, prog?.id)}>
               <div className="cert">
                 <div className="cert-main">
                   <div className="cert-top">
                     <span>XAUUSD</span>
                     <span className="sep" />
-                    <span>Değerlendirme</span>
+                    <span>{prog?.name ?? 'Özel program'}</span>
                   </div>
                   <div className="cert-no">{money0(size)}</div>
                   <div className="rule-strip">
                     <span>
-                      <b>{money0((size * rules.target) / 100)}</b>hedef %{rules.target}
+                      <b>{targets.map((t) => money0((size * t) / 100)).join(' → ')}</b>hedef
                     </span>
                     <span>
-                      <b>{money0((size * rules.dailyLoss) / 100)}</b>günlük limit %{rules.dailyLoss}
+                      <b>{money0((size * rules.dailyLoss) / 100)}</b>günlük limit
                     </span>
                     <span>
-                      <b>{money0((size * rules.maxLoss) / 100)}</b>toplam limit %{rules.maxLoss}
+                      <b>{money0((size * rules.maxLoss) / 100)}</b>toplam limit
                     </span>
                   </div>
                 </div>
                 <div className="cert-grade">
-                  <span className="g-value">{sizeLabel(a.size)}</span>
-                  <span className="g-sub">Hesabı aç</span>
+                  <span className="g-label">{prog ? 'Fiyat' : 'Aç'}</span>
+                  <span className="g-value">{prog ? money(price) : sizeLabel(size)}</span>
+                  {prog && list !== undefined ? <span className="g-sub list-price">{money(list)}</span> : <span className="g-sub">ücretsiz</span>}
                 </div>
               </div>
             </button>

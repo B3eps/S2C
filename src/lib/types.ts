@@ -80,6 +80,14 @@ export interface Rules {
   minDays: number;
   split: number; // % trader share
   payoutMin: number; // % profit needed to request payout
+  /** profit target per step, e.g. [9, 4.5] for a two-step challenge */
+  targets?: number[];
+  /** a day counts toward minDays only if its realised profit reaches this % of size (0: any traded day) */
+  minDayPct?: number;
+  /** smallest payout, in trader share dollars */
+  payoutMinUsd?: number;
+  /** commission, % of notional per side */
+  commissionPct?: number;
 }
 
 export interface Payout {
@@ -107,6 +115,15 @@ export interface Account {
   rules: Rules;
   tradingDays: string[];
   payouts: Payout[];
+  /** challenge step, 0-based */
+  step?: number;
+  programId?: string;
+  programName?: string;
+  /** what the trader paid for the account */
+  fee?: number;
+  archived?: boolean;
+  /** realised P&L per replay day (session:day) in the current step */
+  dayPnl?: Record<string, number>;
 }
 
 export type DrawingKind = 'trend' | 'hline' | 'rect';
