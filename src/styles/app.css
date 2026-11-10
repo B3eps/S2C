@@ -2235,3 +2235,6 @@ table.tbl {
   display: grid;
   place-items: center;
 }
+
+.pkg:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.pkg:disabled .cert { box-shadow: none; }

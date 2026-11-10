@@ -3,8 +3,8 @@ import { Feed, randomStart } from './lib/feed';
 import { store as db } from './lib/db';
 import { play, configureSound } from './lib/sound';
 import { atr } from './lib/indicators';
-import { dayKeyUtc, money0 } from './lib/format';
-import { PROGRAMS, salePrice, stepTargets } from './lib/programs';
+import { money0 } from './lib/format';
+import { PROGRAMS, propDay, salePrice, stepTargets } from './lib/programs';
 import type { ActiveInd } from './lib/indicators';
 import {
   Account, CONTRACT, CloseReason, DEFAULT_RULES, Drawing, DrawingKind, MIN_LOT, Order, OrderType, Position, Rules,
@@ -199,12 +199,15 @@ export function accountLimits(a: Account, s: SessionRec | null) {
   const targets = stepTargets(a.rules);
   const step = Math.min(a.step ?? 0, targets.length - 1);
   const dayFloor = (s?.dayStartEquity ?? a.balance) - (size * a.rules.dailyLoss) / 100;
-  const maxFloor = size * (1 - a.rules.maxLoss / 100);
+  const maxAmt = (size * a.rules.maxLoss) / 100;
+  // trailing: rises with the closed balance, never falls, locks at the initial balance
+  const maxFloor = a.rules.maxType === 'trailing' ? Math.min(size, Math.max(size - maxAmt, (a.peak ?? size) - maxAmt)) : size - maxAmt;
+  const buffer = ((a.rules.payoutBufferPct ?? 0) / 100) * ((size * a.rules.dailyLoss) / 100);
   const targetPct = targets[step];
   const target = size * (1 + targetPct / 100);
   const minGross = (a.rules.payoutMinUsd ?? 0) / (a.rules.split / 100);
-  const payoutAt = Math.max(size * (1 + a.rules.payoutMin / 100), size + minGross, size + 0.01);
-  return { dayFloor, maxFloor, target, targetPct, step, steps: targets.length, payoutAt };
+  const payoutAt = Math.max(size * (1 + a.rules.payoutMin / 100), size + buffer + minGross, size + 0.01);
+  return { dayFloor, maxFloor, target, targetPct, step, steps: targets.length, payoutAt, buffer };
 }
 
 /** Days that count toward the minimum: profitable days when the program asks for them, else any traded day. */
@@ -213,6 +216,28 @@ export function countedDays(a: Account) {
   if (!pct) return new Set(a.tradingDays).size;
   const need = (a.size * pct) / 100;
   return Object.values(a.dayPnl ?? {}).filter((v) => v >= need).length;
+}
+
+/** Best day as a % of total realised profit (the firm's consistency score). */
+export function consistencyScore(a: Account) {
+  const days = Object.values(a.dayPnl ?? {});
+  const total = days.reduce((x, y) => x + y, 0);
+  if (total <= 0) return 0;
+  return (Math.max(...days) / total) * 100;
+}
+
+/** Why a payout cannot be requested now, or null. */
+export function payoutBlocker(a: Account, openPositions: number): string | null {
+  if (a.phase !== 'funded' || a.status !== 'active') return null;
+  const lim = accountLimits(a, null);
+  if (openPositions) return 'Ödeme için açık pozisyon olmamalı.';
+  if (a.balance < lim.payoutAt) return `Ödeme için bakiye en az ${money0(lim.payoutAt)} olmalı.`;
+  const need = a.rules.payoutMinDays ?? 0;
+  const have = new Set(a.payoutDays ?? []).size;
+  if (have < need) return `Ödeme için ${need - have} işlem günü daha gerekli.`;
+  const cap = a.rules.payoutConsistencyPct;
+  if (cap && consistencyScore(a) > cap) return `Tutarlılık: en iyi gün toplam kârın %${consistencyScore(a).toFixed(0)}’i (sınır %${cap}).`;
+  return null;
 }
 
 /** Why a reached target has not passed yet, or null when it can pass now. */
@@ -225,6 +250,8 @@ export function passBlocker(a: Account, openPositions: number): string | null {
     return a.rules.minDayPct ? `Hedef tamam · ${left} kârlı gün daha (günde en az %${String(a.rules.minDayPct).replace('.', ',')})` : `Hedef tamam · ${left} işlem günü daha`;
   }
   if (openPositions) return 'Hedef tamam · açık pozisyonları kapat';
+  const cap = a.rules.consistencyPct;
+  if (cap && consistencyScore(a) > cap) return `Hedef tamam · tutarlılık: en iyi gün kârın %${consistencyScore(a).toFixed(0)}’i (sınır %${cap})`;
   return null;
 }
 
@@ -340,7 +367,7 @@ export const useApp = create<State>((set, get) => {
     const commission = (((p.entry + exit) * p.lots * CONTRACT) * (a.rules.commissionPct ?? 0)) / 100;
     const pnl = pnlOf(p.side, p.entry, exit, p.lots) - commission;
     const risk = riskOf(p.entry, p.initialSl, p.lots);
-    const dk = `${s.id}:${dayKeyUtc(at - 60_000)}`;
+    const dk = `${s.id}:${propDay(at - 60_000)}`;
     a.dayPnl = { ...(a.dayPnl ?? {}), [dk]: (a.dayPnl?.[dk] ?? 0) + pnl };
     const trade: Trade = {
       id: p.id,
@@ -366,6 +393,7 @@ export const useApp = create<State>((set, get) => {
     };
     s.positions = s.positions.filter((x) => x.id !== p.id);
     a.balance += pnl;
+    a.peak = Math.max(a.peak ?? a.size, a.balance);
     db.putTrade(trade);
     set({
       trades: [...get().trades.filter((t) => t.id !== trade.id), trade],
@@ -387,8 +415,9 @@ export const useApp = create<State>((set, get) => {
     const a = account()!;
     const p: Position = { id: uid(), side, lots, entry, sl, tp, initialSl: sl, riskLocked: sl !== undefined, openedAt: at, orderType: type };
     s.positions.push(p);
-    const key = `${s.id}:${dayKeyUtc(at)}`;
+    const key = `${s.id}:${propDay(at)}`;
     if (!a.tradingDays.includes(key)) a.tradingDays.push(key);
+    if (a.phase === 'funded') a.payoutDays = [...new Set([...(a.payoutDays ?? []), key])];
     saveAccount(a);
     shotJobs.push({ kind: 'open', posId: p.id });
     play('fill');
@@ -406,11 +435,11 @@ export const useApp = create<State>((set, get) => {
     const at = feed.clock;
 
     // day roll
-    const dk = dayKeyUtc(m.t);
+    const dk = propDay(m.t);
     if (dk !== s.dayKey) {
       const floating = s.positions.reduce((acc, p) => acc + pnlOf(p.side, p.entry, m.o, p.lots), 0);
       s.dayKey = dk;
-      s.dayStartEquity = a.balance + floating;
+      s.dayStartEquity = a.rules.dailyBase === 'balance' ? a.balance : Math.max(a.balance, a.balance + floating);
       warned = { day: false, max: false };
     }
     s.high = Math.max(s.high ?? m.h, m.h);
@@ -488,11 +517,14 @@ export const useApp = create<State>((set, get) => {
     if (!s || !a || a.phase !== 'challenge' || a.status !== 'active') return false;
     const lim = accountLimits(a, s);
     if (a.balance < lim.target || s.positions.length || countedDays(a) < a.rules.minDays) return false;
+    if (a.rules.consistencyPct && consistencyScore(a) > a.rules.consistencyPct) return false;
     s.orders = [];
     const last = lim.step >= lim.steps - 1;
     a.balance = a.size;
     a.tradingDays = [];
     a.dayPnl = {};
+    a.peak = a.size;
+    a.payoutDays = [];
     if (last) {
       a.phase = 'funded';
       a.fundedAt = Date.now();
@@ -627,7 +659,7 @@ export const useApp = create<State>((set, get) => {
           positions: [],
           drawings: [],
           dayStartEquity: a.balance,
-          dayKey: dayKeyUtc(start),
+          dayKey: propDay(start),
         };
       }
       set({ view: 'trade', loading: { progress: 0 }, session: null, ticket: null, tool: 'cursor', playing: false, showPrice: false });
@@ -1023,14 +1055,16 @@ export const useApp = create<State>((set, get) => {
         return;
       }
       const lim = accountLimits(a, null);
-      if (a.balance < lim.payoutAt) {
-        get().showToast(`Ödeme için bakiye en az ${money0(lim.payoutAt)} olmalı.`, 'warn');
+      const why = payoutBlocker(a, 0);
+      if (why) {
+        get().showToast(why, 'warn');
         return;
       }
-      const gross = a.balance - a.size;
+      const gross = a.balance - a.size - lim.buffer;
       const amount = (gross * a.rules.split) / 100;
       a.payouts = [...a.payouts, { id: uid(), accountId: a.id, gross, amount, at: Date.now() }];
-      a.balance = a.size;
+      a.balance = a.size + lim.buffer;
+      a.payoutDays = [];
       if (s && s.accountId === a.id) {
         s.dayStartEquity = a.balance;
         persistSession(s, true);

@@ -42,10 +42,15 @@ export function NewAccount() {
             Günlük zarar <b>{pctTr(rules.dailyLoss)}</b>
           </span>
           <span>
-            Toplam zarar <b>{pctTr(rules.maxLoss)}</b>
+            Toplam zarar <b>{pctTr(rules.maxLoss)}</b> {rules.maxType === 'trailing' ? 'takip eden' : 'sabit'}
           </span>
+          {rules.consistencyPct ? (
+            <span>
+              Tutarlılık <b>en iyi gün ≤ {pctTr(rules.consistencyPct)}</b>
+            </span>
+          ) : null}
           <span>
-            Asgari gün <b>{rules.minDays}</b>
+            Asgari gün <b>{rules.minDays || 'yok'}</b>
             {rules.minDayPct ? ` kârlı (günde ≥ ${pctTr(rules.minDayPct)})` : ''}
           </span>
           <span>
@@ -66,7 +71,7 @@ export function NewAccount() {
           const list = prog?.prices[size];
           const price = list !== undefined ? salePrice(list) : 0;
           return (
-            <button key={size} className="pkg" onClick={() => S().createAccount(size, prog?.id)}>
+            <button key={size} className="pkg" disabled={!!prog && list === undefined} onClick={() => S().createAccount(size, prog?.id)}>
               <div className="cert">
                 <div className="cert-main">
                   <div className="cert-top">
@@ -89,7 +94,7 @@ export function NewAccount() {
                 </div>
                 <div className="cert-grade">
                   <span className="g-label">{prog ? 'Fiyat' : 'Aç'}</span>
-                  <span className="g-value">{prog ? money(price) : sizeLabel(size)}</span>
+                  <span className="g-value">{prog ? (list !== undefined ? money(price) : '—') : sizeLabel(size)}</span>
                   {prog && list !== undefined ? <span className="g-sub list-price">{money(list)}</span> : <span className="g-sub">ücretsiz</span>}
                 </div>
               </div>

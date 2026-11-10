@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useApp, SPEEDS, ticketLots, riskOf, pnlOf, accountLimits, countedDays, passBlocker } from '../store';
+import { useApp, SPEEDS, ticketLots, riskOf, pnlOf, accountLimits, countedDays, passBlocker, payoutBlocker, consistencyScore } from '../store';
 import { ChartPanel } from '../components/ChartPanel';
 import { ToolRail, GRID } from '../components/ToolRail';
 import { CertLabel, CountUp, RuleGauges } from '../components/bits';
@@ -291,12 +291,22 @@ function OrderPanel() {
         <dl className="kv">
           <dt>Günlük zarar limiti</dt>
           <dd>
-            %{account.rules.dailyLoss} · {money0((account.size * account.rules.dailyLoss) / 100)}
+            %{String(account.rules.dailyLoss).replace('.', ',')} · {money0((account.size * account.rules.dailyLoss) / 100)}
           </dd>
+          <dt>Gün başı (22:00 UTC)</dt>
+          <dd>{account.rules.dailyBase === 'balance' ? 'bakiye' : 'bakiye/varlık yüksek olan'}</dd>
           <dt>Toplam zarar limiti</dt>
           <dd>
-            %{account.rules.maxLoss} · alt sınır {money0(lim.maxFloor)}
+            %{account.rules.maxLoss} {account.rules.maxType === 'trailing' ? 'takip eden' : 'sabit'} · alt sınır {money0(lim.maxFloor)}
           </dd>
+          {!!account.rules.consistencyPct && account.phase === 'challenge' && (
+            <>
+              <dt>Tutarlılık (en iyi gün)</dt>
+              <dd>
+                %{consistencyScore(account).toFixed(0)} / %{account.rules.consistencyPct}
+              </dd>
+            </>
+          )}
           {account.phase === 'challenge' ? (
             <>
               <dt>{lim.steps > 1 ? `Aşama ${lim.step + 1}/${lim.steps} hedefi` : 'Kâr hedefi'}</dt>
@@ -316,8 +326,28 @@ function OrderPanel() {
               </dd>
               <dt>Kâr payın</dt>
               <dd>%{account.rules.split}</dd>
-              <dt>Ödeme şartı</dt>
-              <dd>açık pozisyon yok</dd>
+              {!!account.rules.payoutConsistencyPct && (
+                <>
+                  <dt>Ödeme tutarlılığı</dt>
+                  <dd>
+                    %{consistencyScore(account).toFixed(0)} / %{account.rules.payoutConsistencyPct}
+                  </dd>
+                </>
+              )}
+              {!!account.rules.payoutMinDays && (
+                <>
+                  <dt>Ödeme öncesi işlem günü</dt>
+                  <dd>
+                    {new Set(account.payoutDays ?? []).size} / {account.rules.payoutMinDays}
+                  </dd>
+                </>
+              )}
+              {lim.buffer > 0 && (
+                <>
+                  <dt>Hesapta kalan tampon</dt>
+                  <dd>{money0(lim.buffer)}</dd>
+                </>
+              )}
             </>
           )}
         </dl>
@@ -325,7 +355,7 @@ function OrderPanel() {
         {passBlocker(account, session.positions.length) && <div className="hint-line warn-c">{passBlocker(account, session.positions.length)}</div>}
         {!!account.rules.commissionPct && <div className="hint-line">Komisyon %{String(account.rules.commissionPct).replace('.', ',')} / yön, kâr ve zarara dahil.</div>}
         {account.phase === 'funded' && (
-          <button className="btn" disabled={account.balance < lim.payoutAt || session.positions.length > 0} onClick={() => S().requestPayout(account.id)}>
+          <button className="btn" disabled={!!payoutBlocker(account, session.positions.length)} title={payoutBlocker(account, session.positions.length) ?? undefined} onClick={() => S().requestPayout(account.id)}>
             <Icon name="coin" size={16} /> Ödeme iste
           </button>
         )}

@@ -88,6 +88,18 @@ export interface Rules {
   payoutMinUsd?: number;
   /** commission, % of notional per side */
   commissionPct?: number;
+  /** day start reference at 22:00 UTC: higher of equity/balance, or balance only */
+  dailyBase?: 'max' | 'balance';
+  /** static: fixed floor; trailing: rises with balance, locks at the initial balance */
+  maxType?: 'static' | 'trailing';
+  /** evaluation: best day may be at most this % of total realised profit */
+  consistencyPct?: number;
+  /** payout: best day may be at most this % of lifetime realised profit */
+  payoutConsistencyPct?: number;
+  /** payout must leave this % of the daily drawdown amount above the initial balance */
+  payoutBufferPct?: number;
+  /** traded days needed since activation / the last payout before a payout */
+  payoutMinDays?: number;
 }
 
 export interface Payout {
@@ -122,8 +134,12 @@ export interface Account {
   /** what the trader paid for the account */
   fee?: number;
   archived?: boolean;
-  /** realised P&L per replay day (session:day) in the current step */
+  /** realised P&L per prop day (session:day) in the current step, or since funding */
   dayPnl?: Record<string, number>;
+  /** highest closed balance in the current step, for trailing drawdown */
+  peak?: number;
+  /** traded days since activation or the last payout */
+  payoutDays?: string[];
 }
 
 export type DrawingKind =
@@ -169,7 +185,7 @@ export const DEFAULT_RULES: Rules = {
   payoutMin: 1,
 };
 
-export const PACKAGES = [5_000, 10_000, 25_000, 50_000, 100_000];
+export const PACKAGES = [5_000, 10_000, 25_000, 50_000, 100_000, 200_000];
 
 /** cTrader XAUUSD contract: 1 lot = 100 oz */
 export const CONTRACT = 100;

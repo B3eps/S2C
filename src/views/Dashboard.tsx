@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useApp, accountLimits } from '../store';
+import { useApp, payoutBlocker } from '../store';
 import { CertLabel, RuleGauges } from '../components/bits';
 import { Icon } from '../components/Icon';
 import { Emblem } from '../components/Emblem';
@@ -85,7 +85,6 @@ export function Dashboard() {
           <div className="acct-grid">
             {list.map((a) => {
               const isLive = session?.accountId === a.id;
-              const lim = accountLimits(a, null);
               const hasOpen = sessions.some((s) => s.accountId === a.id && !s.endedAt);
               const archiveBtn = (
                 <button className="icon-btn" title={a.archived ? 'Arşivden çıkar' : 'Arşive at'} onClick={() => S().archiveAccount(a.id, !a.archived)}>
@@ -109,7 +108,12 @@ export function Dashboard() {
                         <div className="actions">
                           {archiveBtn}
                           {a.phase === 'funded' && (
-                            <button className="btn" disabled={a.balance < lim.payoutAt || (isLive && !!session?.positions.length)} onClick={() => S().requestPayout(a.id)}>
+                            <button
+                              className="btn"
+                              disabled={!!payoutBlocker(a, isLive ? session?.positions.length ?? 0 : 0)}
+                              title={payoutBlocker(a, isLive ? session?.positions.length ?? 0 : 0) ?? undefined}
+                              onClick={() => S().requestPayout(a.id)}
+                            >
                               <Icon name="coin" size={16} /> Ödeme iste
                             </button>
                           )}
