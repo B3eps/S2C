@@ -76,3 +76,7 @@ npm run build
 ```
 
 `npm run test:browser`, Chrome kurulu bir bilgisayarda geçici bir profil, sentetik mumlar ve örnek hesaplarla uçtan uca test yapar.
+
+## Lisans
+
+[MIT](LICENSE)
