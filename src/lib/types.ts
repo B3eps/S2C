@@ -126,12 +126,20 @@ export interface Account {
   dayPnl?: Record<string, number>;
 }
 
-export type DrawingKind = 'trend' | 'hline' | 'rect';
+export type DrawingKind =
+  | 'trend' | 'ray' | 'extended' | 'hline' | 'hray' | 'vline' | 'cross'
+  | 'channel' | 'regression' | 'pitchfork' | 'fib' | 'rect' | 'longpos' | 'shortpos' | 'measure';
+export interface Anchor {
+  t: number;
+  p: number;
+}
 export interface Drawing {
   id: string;
   kind: DrawingKind;
-  a: { t: number; p: number };
-  b: { t: number; p: number };
+  a: Anchor;
+  b: Anchor;
+  /** third anchor: channel width, pitchfork second pivot, position stop */
+  c?: Anchor;
 }
 
 export interface SessionRec {

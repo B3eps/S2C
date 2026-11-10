@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../store';
 import { store as db } from '../lib/db';
 import { Icon } from '../components/Icon';
+import { TradeChart } from '../components/TradeChart';
 import { REASON } from './Trade';
 import { goldPrice, longDate, clockUtc, lots as fmtLots, rMult, signedMoney, wallDate } from '../lib/format';
 
@@ -127,6 +128,7 @@ export function Journal() {
               <dt>Giriş → çıkış</dt>
               <dd>{revealed ? `${goldPrice(sel.entry)} → ${goldPrice(sel.exit)}` : 'Seans bitince açılır'}</dd>
             </dl>
+            <TradeChart trade={sel} revealed={revealed} until={revealed ? undefined : sess?.clockMs} />
             <div className="shots">
               <Shot id={sel.shotOpen} caption="Giriş anı" />
               <Shot id={sel.shotClose} caption="Çıkış anı" />

@@ -104,6 +104,50 @@ const P: Record<string, JSX.Element> = {
   ),
   pencil: <path d="M3.75 16.25l.75-3.75 8.75-8.75 3 3-8.75 8.75zM11.25 5.75l3 3" />,
   sliders: <path d="M5 2.75v14.5M10 2.75v14.5M15 2.75v14.5M3 12h4M8 6.5h4M13 10.5h4" />,
+  ray: (
+    <>
+      <path d="M5.25 14.75l12-12" />
+      <path d="M2.75 14.25h3v3h-3z" />
+    </>
+  ),
+  extended: <path d="M1.75 18.25l16.5-16.5M7.75 10.75h3v3h-3zM9.25 6.25h3v3h-3z" />,
+  hray: (
+    <>
+      <path d="M5.75 10h12.5" />
+      <path d="M2.75 8.5h3v3h-3z" />
+    </>
+  ),
+  vline: (
+    <>
+      <path d="M10 1.75v6.5M10 11.75v6.5" />
+      <path d="M8.25 8.25h3.5v3.5h-3.5z" />
+    </>
+  ),
+  crossline: <path d="M10 1.75v16.5M1.75 10h16.5" />,
+  channel: <path d="M2.75 12.75l14.5-7M2.75 17.25l14.5-7M2.75 15l14.5-7" strokeDasharray="0" />,
+  regression: <path d="M2.75 13.5l14.5-7M2.75 9.5l14.5-7M2.75 17.5l14.5-7" />,
+  pitchfork: <path d="M2.75 17.25L10 10M10 10l7.25-3.25M7.5 5l9.75-3M12.5 15l4.75-1.5M7.5 5l5 10" />,
+  fib: <path d="M2.75 3.25h14.5M2.75 7.5h14.5M2.75 10.75h14.5M2.75 13.5h14.5M2.75 16.75h14.5" />,
+  longpos: (
+    <>
+      <path d="M3.25 3.25h13.5v7.5H3.25z" />
+      <path d="M3.25 10.75h13.5v6H3.25z" fill="currentColor" fillOpacity="0.25" />
+    </>
+  ),
+  shortpos: (
+    <>
+      <path d="M3.25 3.25h13.5v6H3.25z" fill="currentColor" fillOpacity="0.25" />
+      <path d="M3.25 9.25h13.5v7.5H3.25z" />
+    </>
+  ),
+  measure: <path d="M3.75 16.25L16.25 3.75M3.75 16.25h4.5M3.75 16.25v-4.5M16.25 3.75h-4.5M16.25 3.75v4.5" />,
+  grid: <path d="M2.75 2.75h6.5v6.5h-6.5zM10.75 2.75h6.5v6.5h-6.5zM2.75 10.75h6.5v6.5h-6.5zM10.75 10.75h6.5v6.5h-6.5z" />,
+  info: (
+    <>
+      <path d="M10 2.75a7.25 7.25 0 110 14.5 7.25 7.25 0 010-14.5z" />
+      <path d="M10 9v5M10 6v.5" />
+    </>
+  ),
   calendar: <path d="M2.75 4.75h14.5v12.5H2.75zM2.75 8.25h14.5M6.25 2.75v3.5M13.75 2.75v3.5" />,
 };
 

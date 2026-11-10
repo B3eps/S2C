@@ -86,15 +86,23 @@ export interface Notice {
 }
 
 export interface ChartPrefs {
-  layout: 'single' | 'dual';
-  tfA: TF;
-  tfB: TF;
-  indA: ActiveInd[];
-  indB: ActiveInd[];
+  /** how many chart panes are shown (1, 2, 3, 4, 6, 8) */
+  count: number;
+  panes: PaneCfg[];
   speed: number;
 }
 
 export const SPEEDS = [1, 2, 4, 8, 16, 32];
+export const LAYOUTS = [1, 2, 3, 4, 6, 8];
+
+export interface PaneCfg {
+  tf: TF;
+  ind: ActiveInd[];
+}
+const PANE_TFS: TF[] = ['5m', '1h', '15m', '4h', '1m', '5m', '15m', '1h'];
+const defaultPanes = (): PaneCfg[] => PANE_TFS.map((tf) => ({ tf, ind: [] }));
+/** The first pane drives replay steps and trade records. */
+export const mainTf = (p: ChartPrefs) => p.panes[0].tf;
 
 interface Live {
   price: number;
@@ -137,6 +145,9 @@ interface State {
   stepMinutes(n: number): void;
   setPlaying(p: boolean): void;
   setPrefs(p: Partial<ChartPrefs>): void;
+  setPane(i: number, p: Partial<PaneCfg>): void;
+  showPrice: boolean;
+  setShowPrice(v: boolean): void;
   setTool(t: Tool): void;
   openTicket(side: Side, type?: OrderType, entry?: number): void;
   updateTicket(p: Partial<Ticket>): void;
@@ -233,13 +244,19 @@ const accountNo = (existing: Account[]) => {
 };
 
 const DEFAULT_PREFS: ChartPrefs = {
-  layout: 'single',
-  tfA: '5m',
-  tfB: '1h',
-  indA: [],
-  indB: [],
+  count: 1,
+  panes: defaultPanes(),
   speed: 1,
 };
+
+function migratePrefs(raw: unknown): ChartPrefs {
+  const p = (raw ?? {}) as Partial<ChartPrefs> & { layout?: string; tfA?: TF; tfB?: TF; indA?: ActiveInd[]; indB?: ActiveInd[] };
+  if (p.panes && p.panes.length === 8) return { ...DEFAULT_PREFS, ...p, panes: p.panes };
+  const panes = defaultPanes();
+  if (p.tfA) panes[0] = { tf: p.tfA, ind: p.indA ?? [] };
+  if (p.tfB) panes[1] = { tf: p.tfB, ind: p.indB ?? [] };
+  return { count: p.layout === 'dual' ? 2 : 1, panes, speed: p.speed ?? DEFAULT_PREFS.speed };
+}
 
 let warned = { day: false, max: false };
 let lastTicket = { riskPct: 1, manualLots: 0.1, useRisk: true, withSl: true, withTp: true };
@@ -248,7 +265,7 @@ let lastTicket = { riskPct: 1, manualLots: 0.1, useRisk: true, withSl: true, wit
 export function defaultDistance() {
   const f = getFeed();
   if (!f) return 1;
-  const bars = f.bars(useApp.getState().prefs.tfA);
+  const bars = f.bars(mainTf(useApp.getState().prefs));
   return (atr(bars.slice(-200), 14).at(-1) || f.price * 0.002) * 1.5;
 }
 let playRaf = 0;
@@ -342,7 +359,7 @@ export const useApp = create<State>((set, get) => {
       r: risk ? pnl / risk : undefined,
       reason,
       orderType: p.orderType,
-      tf: get().prefs.tfA,
+      tf: mainTf(get().prefs),
       note: get().trades.find((t) => t.id === p.id)?.note ?? '',
       shotOpen: p.shotOpen,
       realClosedAt: Date.now(),
@@ -515,6 +532,7 @@ export const useApp = create<State>((set, get) => {
     ticket: null,
     overlay: null,
     notices: [],
+    showPrice: false,
     replayTradeId: null,
     journalTradeId: null,
     sessionTrades: [],
@@ -544,7 +562,7 @@ export const useApp = create<State>((set, get) => {
         trades,
         sessions,
         settings: st,
-        prefs: { ...DEFAULT_PREFS, ...(prefs ?? {}) },
+        prefs: migratePrefs(prefs),
       });
       let last: string | null = null;
       try {
@@ -612,7 +630,7 @@ export const useApp = create<State>((set, get) => {
           dayKey: dayKeyUtc(start),
         };
       }
-      set({ view: 'trade', loading: { progress: 0 }, session: null, ticket: null, tool: 'cursor', playing: false });
+      set({ view: 'trade', loading: { progress: 0 }, session: null, ticket: null, tool: 'cursor', playing: false, showPrice: false });
       try {
         localStorage.setItem('s2c:view', 'trade');
       } catch {
@@ -699,7 +717,7 @@ export const useApp = create<State>((set, get) => {
 
     stepBar() {
       if (!feed || !get().session) return;
-      const ms = TF_MS[get().prefs.tfA];
+      const ms = TF_MS[mainTf(get().prefs)];
       let revealed = 0;
       for (let guard = 0; guard < 2000; guard++) {
         if (!feed.step()) {
@@ -754,6 +772,15 @@ export const useApp = create<State>((set, get) => {
       const prefs = { ...get().prefs, ...p };
       set({ prefs });
       db.putKv('prefs', prefs);
+    },
+
+    setPane(i, p) {
+      const panes = get().prefs.panes.map((x, j) => (j === i ? { ...x, ...p } : x));
+      get().setPrefs({ panes });
+    },
+
+    setShowPrice(v) {
+      set({ showPrice: v });
     },
 
     setTool(tool) {

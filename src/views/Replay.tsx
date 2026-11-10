@@ -43,6 +43,7 @@ export function Replay() {
     const ctrl = new ChartController(hostRef.current, trade.tf);
     ctrlRef.current = ctrl;
     ctrl.setBandsVisible(true);
+    ctrl.setPriceMode(!!session?.endedAt, trade.entry);
     return () => {
       ctrl.destroy();
       ctrlRef.current = null;

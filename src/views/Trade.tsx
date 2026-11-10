@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useApp, SPEEDS, ticketLots, riskOf, pnlOf, accountLimits, countedDays, passBlocker } from '../store';
 import { ChartPanel } from '../components/ChartPanel';
+import { ToolRail, GRID } from '../components/ToolRail';
 import { CertLabel, CountUp, RuleGauges } from '../components/bits';
 import { Icon } from '../components/Icon';
 import { marketSession } from '../lib/calendar';
@@ -30,10 +31,14 @@ export function Trade() {
     <div className="trade">
       <TopBar />
       <div className="trade-body">
-        <Tools />
-        <div className={`charts ${prefs.layout === 'dual' ? 'dual' : ''}`}>
-          <ChartPanel slot="a" primary />
-          {prefs.layout === 'dual' && <ChartPanel slot="b" primary={false} />}
+        <ToolRail />
+        <div
+          className="charts grid"
+          style={{ gridTemplateColumns: `repeat(${GRID[prefs.count]?.[0] ?? 1}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${GRID[prefs.count]?.[1] ?? 1}, minmax(0, 1fr))` }}
+        >
+          {Array.from({ length: prefs.count }, (_, i) => (
+            <ChartPanel key={i} index={i} />
+          ))}
         </div>
         <OrderPanel />
       </div>
@@ -129,47 +134,6 @@ function TopBar() {
           <Icon name="flag" size={16} /> Seansı bitir
         </button>
       )}
-    </div>
-  );
-}
-
-function Tools() {
-  const tool = useApp((s) => s.tool);
-  const setTool = useApp((s) => s.setTool);
-  const clearDrawings = useApp((s) => s.clearDrawings);
-  const prefs = useApp((s) => s.prefs);
-  const setPrefs = useApp((s) => s.setPrefs);
-  const settings = useApp((s) => s.settings);
-  const saveSettings = useApp((s) => s.saveSettings);
-  const n = useApp((s) => s.session?.drawings.length ?? 0);
-  return (
-    <div className="tools">
-      <button className="icon-btn" aria-pressed={tool === 'cursor'} title="İmleç" onClick={() => setTool('cursor')}>
-        <Icon name="cursor" />
-      </button>
-      <button className="icon-btn" aria-pressed={tool === 'trend'} title="Trend çizgisi" onClick={() => setTool('trend')}>
-        <Icon name="trend" />
-      </button>
-      <button className="icon-btn" aria-pressed={tool === 'hline'} title="Yatay seviye" onClick={() => setTool('hline')}>
-        <Icon name="hline" />
-      </button>
-      <button className="icon-btn" aria-pressed={tool === 'rect'} title="Kutu" onClick={() => setTool('rect')}>
-        <Icon name="rect" />
-      </button>
-      <button className="icon-btn" title="Tüm çizimleri sil" disabled={!n} onClick={clearDrawings} style={{ opacity: n ? 1 : 0.4 }}>
-        <Icon name="trash" />
-      </button>
-      <hr />
-      <button className="icon-btn" aria-pressed={prefs.layout === 'single'} title="Tek grafik" onClick={() => setPrefs({ layout: 'single' })}>
-        <Icon name="single" />
-      </button>
-      <button className="icon-btn" aria-pressed={prefs.layout === 'dual'} title="İki zaman dilimi" onClick={() => setPrefs({ layout: 'dual' })}>
-        <Icon name="dual" />
-      </button>
-      <hr />
-      <button className="icon-btn" title={settings.sound ? 'Sesi kapat' : 'Sesi aç'} onClick={() => saveSettings({ sound: !settings.sound })}>
-        <Icon name={settings.sound ? 'soundOn' : 'soundOff'} />
-      </button>
     </div>
   );
 }

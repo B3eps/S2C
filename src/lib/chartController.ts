@@ -6,6 +6,7 @@ import { C, SERIES, alpha } from './theme';
 import { ActiveInd, IND_BY_ID, IndDef } from './indicators';
 import { Bar, TF, TF_MS } from './types';
 import { marketSession } from './calendar';
+import { clockUtc } from './format';
 
 const sec = (ms: number) => (ms / 1000) as UTCTimestamp;
 
@@ -56,16 +57,25 @@ export class ChartController {
         panes: { separatorColor: C.rule, separatorHoverColor: alpha(C.gold, 0.3), enableResize: true },
       },
       grid: { vertLines: { color: C.grid }, horzLines: { color: C.grid } },
-      rightPriceScale: { visible: false },
+      rightPriceScale: { visible: true, borderColor: C.rule, minimumWidth: 64 },
       leftPriceScale: { visible: false },
-      timeScale: { visible: false, rightOffset: 8, barSpacing: 7, minBarSpacing: 1.5, shiftVisibleRangeOnNewBar: true },
+      timeScale: {
+        visible: true,
+        borderColor: C.rule,
+        rightOffset: 8,
+        barSpacing: 7,
+        minBarSpacing: 1.5,
+        shiftVisibleRangeOnNewBar: true,
+        // time of day only: the date stays hidden
+        tickMarkFormatter: (t: number) => clockUtc(t * 1000),
+      },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: alpha(C.ink2, 0.35), labelVisible: false, style: LineStyle.Dashed, width: 1 },
-        horzLine: { color: alpha(C.ink2, 0.35), labelVisible: false, style: LineStyle.Dashed, width: 1 },
+        vertLine: { color: alpha(C.ink2, 0.35), labelVisible: true, labelBackgroundColor: C.ply2, style: LineStyle.Dashed, width: 1 },
+        horzLine: { color: alpha(C.ink2, 0.35), labelVisible: true, labelBackgroundColor: C.ply2, style: LineStyle.Dashed, width: 1 },
       },
-      localization: { priceFormatter: () => '', timeFormatter: () => '' },
-      handleScale: { axisPressedMouseMove: false },
+      localization: { priceFormatter: (p: number) => this.formatPrice(p), timeFormatter: (t: number) => clockUtc(t * 1000) },
+      handleScale: { axisPressedMouseMove: { time: true, price: true }, axisDoubleClickReset: { time: true, price: true } },
     });
     this.bands = this.chart.addSeries(HistogramSeries, {
       priceScaleId: 'bands',
@@ -89,6 +99,30 @@ export class ChartController {
     });
     this.chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.08, bottom: 0.08 } });
     this.markers = createSeriesMarkers(this.candles, []);
+  }
+
+  /**
+   * Hidden mode shows prices as an index: the session's first price is 1.000, every move keeps
+   * its true proportion, the real level stays unknown.
+   */
+  private showReal = false;
+  private anchor = 0;
+  private nf = new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  formatPrice(p: number) {
+    if (this.showReal || !this.anchor) return this.showReal ? this.nf.format(p) : '';
+    return this.nf.format((p / this.anchor) * 1000);
+  }
+  setPriceMode(showReal: boolean, anchor: number) {
+    this.showReal = showReal;
+    this.anchor = anchor;
+    // nudge the scale so labels re-render with the new formatter
+    this.chart.applyOptions({ localization: { priceFormatter: (p: number) => this.formatPrice(p) } });
+  }
+  priceScaleWidth() {
+    return this.chart.priceScale('right').width();
+  }
+  timeScaleHeight() {
+    return this.chart.timeScale().height();
   }
 
   destroy() {
@@ -297,7 +331,7 @@ export class ChartController {
     const last = this.bars[this.bars.length - 1];
     const y1 = last ? this.priceToY(last.c) : 0;
     const y2 = last ? this.priceToY(last.c * 1.001) : 0;
-    return `${ts.logicalToCoordinate(0 as Logical)}|${ts.options().barSpacing}|${y1}|${y2}|${this.mainPaneHeight()}|${this.bars.length}`;
+    return `${ts.logicalToCoordinate(0 as Logical)}|${ts.options().barSpacing}|${y1}|${y2}|${this.mainPaneHeight()}|${this.bars.length}|${this.priceScaleWidth()}`;
   }
 
   screenshot(): string | null {

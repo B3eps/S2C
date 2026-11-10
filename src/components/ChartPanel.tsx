@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SeriesMarker, Time } from 'lightweight-charts';
 import { ChartController, LineSpec } from '../lib/chartController';
 import { getFeed, marketBus, fxBus, shooter, useApp, ticketLots, pnlOf, riskOf, Fx, LineTarget } from '../store';
-import { TF, TFS, TF_LABEL, Drawing, Side, uid } from '../lib/types';
+import { TF, TFS, TF_LABEL, TF_MS, Drawing, Anchor, Side, uid } from '../lib/types';
+import { TOOL_BY_KIND, FIB_LEVELS, regression, defaultStop } from '../lib/drawings';
 import { IND_BY_ID, ActiveInd } from '../lib/indicators';
 import { eventsBetween } from '../lib/calendar';
 import { C, SERIES } from '../lib/theme';
-import { lots as fmtLots, rMult, signedMoney } from '../lib/format';
+import { goldPrice, lots as fmtLots, rMult, signedMoney } from '../lib/format';
 import { Icon } from './Icon';
 import { IndicatorPicker, ParamPopover } from './IndicatorPicker';
 
@@ -146,16 +147,20 @@ function useLines(): OLine[] {
   }, [session, ticket, live.price, account]);
 }
 
-export function ChartPanel({ slot, primary }: { slot: 'a' | 'b'; primary: boolean }) {
+export function ChartPanel({ index }: { index: number }) {
+  const primary = index === 0;
+  const slot = `p${index}`;
   const hostRef = useRef<HTMLDivElement>(null);
   const ctrlRef = useRef<ChartController | null>(null);
   const prefs = useApp((s) => s.prefs);
-  const setPrefs = useApp((s) => s.setPrefs);
+  const setPane = useApp((s) => s.setPane);
   const tool = useApp((s) => s.tool);
+  const showPrice = useApp((s) => s.showPrice);
   const session = useApp((s) => s.session);
   const sessionTrades = useApp((s) => s.sessionTrades);
-  const tf: TF = slot === 'a' ? prefs.tfA : prefs.tfB;
-  const inds: ActiveInd[] = slot === 'a' ? prefs.indA : prefs.indB;
+  const pane = prefs.panes[index];
+  const tf: TF = pane.tf;
+  const inds: ActiveInd[] = pane.ind;
   const [ver, setVer] = useState(0);
   const [barsLen, setBarsLen] = useState(0);
   const [values, setValues] = useState<Record<string, Record<string, number>>>({});
@@ -164,7 +169,7 @@ export function ChartPanel({ slot, primary }: { slot: 'a' | 'b'; primary: boolea
   const [menu, setMenu] = useState<{ x: number; y: number; price: number } | null>(null);
   const [fx, setFx] = useState<(Fx & { id: string; x: number; y: number })[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [draft, setDraft] = useState<Drawing | null>(null);
+  const [draft, setDraft] = useState<{ d: Drawing; stage: 'b' | 'c' } | null>(null);
   const lines = useLines();
 
   // create chart
@@ -179,6 +184,7 @@ export function ChartPanel({ slot, primary }: { slot: 'a' | 'b'; primary: boolea
         setValues(v);
       }
     };
+    ctrl.setPriceMode(useApp.getState().showPrice, useApp.getState().session?.firstPrice ?? 0);
     const f = getFeed();
     if (f) {
       ctrl.reset(f.bars(tf), tf);
@@ -226,6 +232,12 @@ export function ChartPanel({ slot, primary }: { slot: 'a' | 'b'; primary: boolea
     ctrl.reset(f.bars(tf), tf);
     setBarsLen(f.bars(tf).length);
   }, [tf]);
+
+  // price: hidden as an index by default, real on demand
+  const anchor = session?.firstPrice ?? 0;
+  useEffect(() => {
+    ctrlRef.current?.setPriceMode(showPrice, anchor);
+  }, [showPrice, anchor]);
 
   // indicators
   const indKey = JSON.stringify(inds);
@@ -350,40 +362,58 @@ export function ChartPanel({ slot, primary }: { slot: 'a' | 'b'; primary: boolea
     el.addEventListener('pointerup', up);
   };
 
-  // ── drawing creation ──
+  // ── drawing creation: 1, 2 or 3 anchors ──
+  const finishDraft = (d: Drawing) => {
+    S().addDrawing(d);
+    setSelected(d.id);
+    setDraft(null);
+    S().setTool('cursor');
+  };
   const onDrawDown = (e: React.PointerEvent) => {
     if (tool === 'cursor' || e.button !== 0) return;
     const a = toAnchor(e);
     if (!a) return;
-    if (tool === 'hline') {
-      const d: Drawing = { id: uid(), kind: 'hline', a, b: a };
-      S().addDrawing(d);
-      S().setTool('cursor');
-      setSelected(d.id);
+    const def = TOOL_BY_KIND[tool];
+    if (draft?.stage === 'c') {
+      finishDraft({ ...draft.d, c: a });
+      return;
+    }
+    if (def.points === 1) {
+      finishDraft({ id: uid(), kind: tool, a, b: a });
       return;
     }
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    setDraft({ id: uid(), kind: tool, a, b: a });
+    setDraft({ d: { id: uid(), kind: tool, a, b: a }, stage: 'b' });
   };
   const onDrawMove = (e: React.PointerEvent) => {
     if (!draft) return;
-    const b = toAnchor(e);
-    if (b) setDraft({ ...draft, b });
+    const p = toAnchor(e);
+    if (!p) return;
+    setDraft(draft.stage === 'b' ? { ...draft, d: { ...draft.d, b: p } } : { ...draft, d: { ...draft.d, c: p } });
   };
   const onDrawUp = () => {
-    if (!draft) return;
-    const ctrlNow = ctrlRef.current;
-    const ax = ctrlNow?.timeToX(draft.a.t) ?? 0;
-    const bx = ctrlNow?.timeToX(draft.b.t) ?? 0;
-    if (Math.abs(ax - bx) > 3 || Math.abs((ctrlNow?.priceToY(draft.a.p) ?? 0) - (ctrlNow?.priceToY(draft.b.p) ?? 0)) > 3) {
-      S().addDrawing(draft);
-      setSelected(draft.id);
+    if (!draft || draft.stage !== 'b') return;
+    const c = ctrlRef.current;
+    const d = draft.d;
+    const far =
+      Math.abs((c?.timeToX(d.a.t) ?? 0) - (c?.timeToX(d.b.t) ?? 0)) > 3 || Math.abs((c?.priceToY(d.a.p) ?? 0) - (c?.priceToY(d.b.p) ?? 0)) > 3;
+    if (!far) {
+      setDraft(null);
+      return;
     }
-    setDraft(null);
-    S().setTool('cursor');
+    const def = TOOL_BY_KIND[d.kind];
+    if (def.points === 3) setDraft({ d: { ...d, c: d.b }, stage: 'c' });
+    else if (d.kind === 'longpos' || d.kind === 'shortpos') finishDraft({ ...d, c: { t: d.b.t, p: defaultStop(d.a.p, d.b.p) } });
+    else finishDraft(d);
   };
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setDraft(null);
+    window.addEventListener('keydown', esc);
+    return () => window.removeEventListener('keydown', esc);
+  }, []);
 
-  const dragHandle = (d: Drawing, which: 'a' | 'b' | 'both') => (e: React.PointerEvent) => {
+  const dragHandle = (d: Drawing, which: 'a' | 'b' | 'c' | 'both') => (e: React.PointerEvent) => {
+    if (tool !== 'cursor') return;
     e.stopPropagation();
     e.preventDefault();
     setSelected(d.id);
@@ -396,7 +426,8 @@ export function ChartPanel({ slot, primary }: { slot: 'a' | 'b'; primary: boolea
       if (which === 'both') {
         const dt = p.t - start.t;
         const dp = p.p - start.p;
-        S().updateDrawing({ ...d, a: { t: d.a.t + dt, p: d.a.p + dp }, b: { t: d.b.t + dt, p: d.b.p + dp } });
+        const sh = (x: Anchor) => ({ t: x.t + dt, p: x.p + dp });
+        S().updateDrawing({ ...d, a: sh(d.a), b: sh(d.b), ...(d.c ? { c: sh(d.c) } : {}) });
       } else S().updateDrawing({ ...d, [which]: p });
     };
     const up = () => {
@@ -416,58 +447,207 @@ export function ChartPanel({ slot, primary }: { slot: 'a' | 'b'; primary: boolea
 
   const live = useApp((s) => s.live);
   const width = hostRef.current?.clientWidth ?? 0;
+  const scaleW = ctrl?.priceScaleWidth() ?? 0;
+  const plotW = Math.max(0, width - scaleW);
   const paneH = ctrl?.mainPaneHeight() ?? 0;
-  const drawings = [...(session?.drawings ?? []), ...(draft ? [draft] : [])];
+  const drawings = [...(session?.drawings ?? []), ...(draft ? [draft.d] : [])];
   void ver;
 
   const renderDrawing = (d: Drawing) => {
     if (!ctrl) return null;
-    const ax = ctrl.timeToX(d.a.t);
-    const ay = ctrl.priceToY(d.a.p);
-    const bx = ctrl.timeToX(d.b.t);
-    const by = ctrl.priceToY(d.b.p);
-    if (ay == null) return null;
+    const W = plotW;
+    const X = (t: number) => ctrl.timeToX(t);
+    const Y = (p: number) => ctrl.priceToY(p);
+    const ax = X(d.a.t);
+    const ay = Y(d.a.p);
+    const bx = X(d.b.t);
+    const by = Y(d.b.p);
+    if (ax == null || ay == null || bx == null || by == null) return null;
     const sel = selected === d.id;
-    if (d.kind === 'hline') {
-      return (
-        <g key={d.id}>
-          <line x1={0} x2={width} y1={ay} y2={ay} className="dhit" onPointerDown={dragHandle(d, 'both')} />
-          <line x1={0} x2={width} y1={ay} y2={ay} className={`dline ${sel ? 'sel' : ''}`} style={{ pointerEvents: 'none' }} />
-        </g>
-      );
-    }
-    if (ax == null || bx == null || by == null) return null;
-    if (d.kind === 'trend') {
-      return (
-        <g key={d.id}>
-          <line x1={ax} y1={ay} x2={bx} y2={by} className="dhit" onPointerDown={dragHandle(d, 'both')} />
-          <line x1={ax} y1={ay} x2={bx} y2={by} className={`dline ${sel ? 'sel' : ''}`} style={{ pointerEvents: 'none' }} />
-          {sel && (
-            <>
-              <rect x={ax - 4} y={ay - 4} width={8} height={8} className="dhandle" onPointerDown={dragHandle(d, 'a')} />
-              <rect x={bx - 4} y={by - 4} width={8} height={8} className="dhandle" onPointerDown={dragHandle(d, 'b')} />
-            </>
-          )}
-        </g>
-      );
-    }
-    const x = Math.min(ax, bx);
-    const y = Math.min(ay, by);
-    return (
-      <g key={d.id}>
-        <rect x={x} y={y} width={Math.abs(bx - ax)} height={Math.abs(by - ay)} className={`drect ${sel ? 'sel' : ''}`} onPointerDown={dragHandle(d, 'both')} />
-        {sel && (
-          <>
-            <rect x={ax - 4} y={ay - 4} width={8} height={8} className="dhandle" onPointerDown={dragHandle(d, 'a')} />
-            <rect x={bx - 4} y={by - 4} width={8} height={8} className="dhandle" onPointerDown={dragHandle(d, 'b')} />
-          </>
-        )}
+    const cls = `dline ${sel ? 'sel' : ''}`;
+    const body = dragHandle(d, 'both');
+    const H = (which: 'a' | 'b' | 'c', x: number, y: number) =>
+      sel ? <rect key={which} x={x - 4} y={y - 4} width={8} height={8} className="dhandle" onPointerDown={dragHandle(d, which)} /> : null;
+    /** a line through two points, cut at the plot edges */
+    const ext = (x1: number, y1: number, x2: number, y2: number, mode: 'right' | 'both' | 'dir') => {
+      const dx = x2 - x1;
+      if (Math.abs(dx) < 1e-6) return { x1, y1: 0, x2, y2: paneH };
+      const k = (y2 - y1) / dx;
+      const at = (x: number) => y1 + k * (x - x1);
+      if (mode === 'both') return { x1: 0, y1: at(0), x2: W, y2: at(W) };
+      if (mode === 'right') return { x1, y1, x2: W, y2: at(W) };
+      const edge = dx > 0 ? W : 0;
+      return { x1, y1, x2: edge, y2: at(edge) };
+    };
+    const Line = (l: { x1: number; y1: number; x2: number; y2: number }, key: string, extra = '') => (
+      <g key={key}>
+        <line {...l} className="dhit" onPointerDown={body} />
+        <line {...l} className={`${cls} ${extra}`} style={{ pointerEvents: 'none' }} />
       </g>
     );
+    const Label = (x: number, y: number, text: string, key: string, anchor: 'start' | 'end' | 'middle' = 'start', tone = '') => (
+      <text key={key} x={x} y={y} className={`dlabel ${tone}`} textAnchor={anchor}>
+        {text}
+      </text>
+    );
+    const tfMs = TF_MS[tf];
+    const pctTxt = (from: number, to: number) => {
+      const v = ((to - from) / from) * 100;
+      return `${v >= 0 ? '+' : '−'}%${Math.abs(v).toFixed(2).replace('.', ',')}`;
+    };
+
+    switch (d.kind) {
+      case 'trend':
+        return <g key={d.id}>{Line({ x1: ax, y1: ay, x2: bx, y2: by }, 'l')}{H('a', ax, ay)}{H('b', bx, by)}</g>;
+      case 'ray':
+        return <g key={d.id}>{Line(ext(ax, ay, bx, by, 'dir'), 'l')}{H('a', ax, ay)}{H('b', bx, by)}</g>;
+      case 'extended':
+        return <g key={d.id}>{Line(ext(ax, ay, bx, by, 'both'), 'l')}{H('a', ax, ay)}{H('b', bx, by)}</g>;
+      case 'hline':
+        return <g key={d.id}>{Line({ x1: 0, y1: ay, x2: W, y2: ay }, 'l')}{H('a', Math.min(Math.max(ax, 8), W - 8), ay)}</g>;
+      case 'hray':
+        return <g key={d.id}>{Line({ x1: ax, y1: ay, x2: W, y2: ay }, 'l')}{H('a', ax, ay)}</g>;
+      case 'vline':
+        return <g key={d.id}>{Line({ x1: ax, y1: 0, x2: ax, y2: paneH }, 'l')}{H('a', ax, ay)}</g>;
+      case 'cross':
+        return (
+          <g key={d.id}>
+            {Line({ x1: 0, y1: ay, x2: W, y2: ay }, 'h')}
+            {Line({ x1: ax, y1: 0, x2: ax, y2: paneH }, 'v')}
+            {H('a', ax, ay)}
+          </g>
+        );
+      case 'rect':
+        return (
+          <g key={d.id}>
+            <rect x={Math.min(ax, bx)} y={Math.min(ay, by)} width={Math.abs(bx - ax)} height={Math.abs(by - ay)} className={`drect ${sel ? 'sel' : ''}`} onPointerDown={body} />
+            {H('a', ax, ay)}
+            {H('b', bx, by)}
+          </g>
+        );
+      case 'channel': {
+        const main = { x1: ax, y1: ay, x2: bx, y2: by };
+        if (!d.c) return <g key={d.id}>{Line(main, 'l')}</g>;
+        const cx = X(d.c.t) ?? bx;
+        const cy = Y(d.c.p) ?? by;
+        const k = bx === ax ? 0 : (by - ay) / (bx - ax);
+        const off = cy - (ay + k * (cx - ax));
+        const par = { x1: ax, y1: ay + off, x2: bx, y2: by + off };
+        return (
+          <g key={d.id}>
+            <polygon points={`${ax},${ay} ${bx},${by} ${bx},${by + off} ${ax},${ay + off}`} className="dfill" onPointerDown={body} />
+            {Line(main, 'm')}
+            {Line(par, 'p')}
+            {Line({ x1: ax, y1: ay + off / 2, x2: bx, y2: by + off / 2 }, 'mid', 'dashed')}
+            {H('a', ax, ay)}
+            {H('b', bx, by)}
+            {H('c', cx, cy)}
+          </g>
+        );
+      }
+      case 'regression': {
+        const r = regression(ctrl.bars, d.a.t, d.b.t);
+        if (!r) return <g key={d.id}>{Line({ x1: ax, y1: ay, x2: bx, y2: by }, 'l', 'dashed')}</g>;
+        const x1 = X(r.t1) ?? ax;
+        const x2 = X(r.t2) ?? bx;
+        const yy = (t: number, k: number) => Y(r.at(t) + k * r.sd) ?? 0;
+        const up = { x1, y1: yy(r.t1, 2), x2, y2: yy(r.t2, 2) };
+        const lo = { x1, y1: yy(r.t1, -2), x2, y2: yy(r.t2, -2) };
+        return (
+          <g key={d.id}>
+            <polygon points={`${up.x1},${up.y1} ${up.x2},${up.y2} ${lo.x2},${lo.y2} ${lo.x1},${lo.y1}`} className="dfill" onPointerDown={body} />
+            {Line({ x1, y1: yy(r.t1, 0), x2, y2: yy(r.t2, 0) }, 'c')}
+            {Line(up, 'u', 'dashed')}
+            {Line(lo, 'd', 'dashed')}
+            {H('a', x1, yy(r.t1, 0))}
+            {H('b', x2, yy(r.t2, 0))}
+          </g>
+        );
+      }
+      case 'pitchfork': {
+        if (!d.c) return <g key={d.id}>{Line({ x1: ax, y1: ay, x2: bx, y2: by }, 'l', 'dashed')}</g>;
+        const cx = X(d.c.t) ?? bx;
+        const cy = Y(d.c.p) ?? by;
+        const mx = (bx + cx) / 2;
+        const my = (by + cy) / 2;
+        const med = ext(ax, ay, mx, my, 'dir');
+        const k = mx === ax ? 0 : (my - ay) / (mx - ax);
+        const fwd = (x: number, y: number) => {
+          const edge = mx >= ax ? W : 0;
+          return { x1: x, y1: y, x2: edge, y2: y + k * (edge - x) };
+        };
+        return (
+          <g key={d.id}>
+            {Line(med, 'm')}
+            {Line(fwd(bx, by), 'u')}
+            {Line(fwd(cx, cy), 'd')}
+            {Line({ x1: bx, y1: by, x2: cx, y2: cy }, 'bc', 'dashed')}
+            {H('a', ax, ay)}
+            {H('b', bx, by)}
+            {H('c', cx, cy)}
+          </g>
+        );
+      }
+      case 'fib': {
+        const x1 = Math.min(ax, bx);
+        const lv = FIB_LEVELS.map((L) => ({ L, y: Y(d.b.p + (d.a.p - d.b.p) * L) ?? 0 }));
+        return (
+          <g key={d.id}>
+            {lv.slice(1).map((l, i) => (
+              <rect key={`f${i}`} x={x1} y={Math.min(l.y, lv[i].y)} width={W - x1} height={Math.abs(l.y - lv[i].y)} className={`dfib f${i % 2}`} onPointerDown={body} />
+            ))}
+            {lv.map((l) => (
+              <g key={l.L}>
+                {Line({ x1, y1: l.y, x2: W, y2: l.y }, `l${l.L}`, l.L === 0.5 || l.L === 0.618 ? 'strong' : '')}
+                {Label(x1 + 4, l.y - 4, l.L.toFixed(3).replace('.', ','), `t${l.L}`)}
+              </g>
+            ))}
+            {Line({ x1: ax, y1: ay, x2: bx, y2: by }, 'diag', 'dashed')}
+            {H('a', ax, ay)}
+            {H('b', bx, by)}
+          </g>
+        );
+      }
+      case 'longpos':
+      case 'shortpos': {
+        const stop = d.c?.p ?? defaultStop(d.a.p, d.b.p);
+        const sy = Y(stop) ?? ay;
+        const x1 = Math.min(ax, bx);
+        const x2 = Math.max(Math.max(ax, bx), x1 + 120);
+        const rr = Math.abs(d.b.p - d.a.p) / Math.max(1e-9, Math.abs(stop - d.a.p));
+        return (
+          <g key={d.id}>
+            <rect x={x1} y={Math.min(ay, by)} width={x2 - x1} height={Math.abs(by - ay)} className="dpos win" onPointerDown={body} />
+            <rect x={x1} y={Math.min(ay, sy)} width={x2 - x1} height={Math.abs(sy - ay)} className="dpos loss" onPointerDown={body} />
+            <line x1={x1} x2={x2} y1={ay} y2={ay} className="dline" style={{ pointerEvents: 'none' }} />
+            {Label(x1 + 6, by + (by < ay ? 14 : -6), `Hedef ${pctTxt(d.a.p, d.b.p)}`, 'tt', 'start', 'up')}
+            {Label(x1 + 6, sy + (sy > ay ? -6 : 14), `Stop ${pctTxt(d.a.p, stop)}`, 'st', 'start', 'down')}
+            {Label(x1 + 6, ay + (by < ay ? 14 : -6), `R:R 1 : ${rr.toFixed(2).replace('.', ',')}`, 'rr')}
+            {H('a', x1, ay)}
+            {H('b', x2, by)}
+            {H('c', x2, sy)}
+          </g>
+        );
+      }
+      case 'measure': {
+        const up = d.b.p >= d.a.p;
+        const n = Math.round(Math.abs(d.b.t - d.a.t) / tfMs);
+        return (
+          <g key={d.id}>
+            <rect x={Math.min(ax, bx)} y={Math.min(ay, by)} width={Math.abs(bx - ax)} height={Math.abs(by - ay)} className={`dpos ${up ? 'win' : 'loss'}`} onPointerDown={body} />
+            <line x1={ax} y1={ay} x2={bx} y2={by} className="dline dashed" style={{ pointerEvents: 'none' }} />
+            {Label((ax + bx) / 2, Math.min(ay, by) - 6, `${pctTxt(d.a.p, d.b.p)} · ${n} mum`, 'm', 'middle', up ? 'up' : 'down')}
+            {H('a', ax, ay)}
+            {H('b', bx, by)}
+          </g>
+        );
+      }
+    }
+    return null;
   };
 
-  const setTf = (t: TF) => setPrefs(slot === 'a' ? { tfA: t } : { tfB: t });
-  const setInds = (list: ActiveInd[]) => setPrefs(slot === 'a' ? { indA: list } : { indB: list });
+  const setTf = (t: TF) => setPane(index, { tf: t });
+  const setInds = (list: ActiveInd[]) => setPane(index, { ind: list });
 
   return (
     <div className="chart-panel">
@@ -522,7 +702,7 @@ export function ChartPanel({ slot, primary }: { slot: 'a' | 'b'; primary: boolea
           <svg>
             <defs>
               <clipPath id={`clip-${slot}`}>
-                <rect x={0} y={0} width={width} height={paneH} />
+                <rect x={0} y={0} width={plotW} height={paneH} />
               </clipPath>
             </defs>
             <g clipPath={`url(#clip-${slot})`} style={{ pointerEvents: tool === 'cursor' ? undefined : 'none' }}>
@@ -535,11 +715,11 @@ export function ChartPanel({ slot, primary }: { slot: 'a' | 'b'; primary: boolea
               const y = ctrl.priceToY(l.price);
               if (y == null || y < -10 || y > paneH + 10) return null;
               return (
-                <div key={l.key} className={`oline ${l.cls}`} style={{ transform: `translateY(${y}px)` }}>
+                <div key={l.key} className={`oline ${l.cls}`} style={{ transform: `translateY(${y}px)`, right: scaleW }}>
                   {l.draggable && <div className="hit" onPointerDown={startDrag(l)} />}
                   <div className="tag" onPointerDown={startDrag(l)}>
                     <span className="k">{l.k}</span>
-                    <span className="v">{l.v}</span>
+                    <span className="v">{showPrice ? `${l.v} · ${goldPrice(l.price)}` : l.v}</span>
                     {l.missing?.map((f) => (
                       <button
                         key={f}
@@ -565,7 +745,7 @@ export function ChartPanel({ slot, primary }: { slot: 'a' | 'b'; primary: boolea
             ) : f.kind === 'fill' ? (
               <span key={f.id} className="fx-ring big" style={{ left: f.x, top: f.y }} />
             ) : (
-              <span key={f.id} className={`fx-sweep ${f.kind}`} style={{ top: f.y }} />
+              <span key={f.id} className={`fx-sweep ${f.kind}`} style={{ top: f.y, right: scaleW }} />
             ),
           )}
         </div>
@@ -644,7 +824,8 @@ function ChartMenu({ x, y, price, current, onClose }: { x: number; y: number; pr
       <hr />
       <button
         onClick={() => {
-          S().addDrawing({ id: uid(), kind: 'hline', a: { t: 0, p: price }, b: { t: 0, p: price } });
+          const t = getFeed()?.clock ?? 0;
+          S().addDrawing({ id: uid(), kind: 'hline', a: { t, p: price }, b: { t, p: price } });
           onClose();
         }}
       >

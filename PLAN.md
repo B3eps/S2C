@@ -203,3 +203,8 @@ Her aşamanın sonunda sana gösterilir, onayınla sonrakine geçilir.
 ## 6. Açık sorular
 - bem funding kuralları (sen getireceksin).
 - Bilgisayarda Node.js kurulu mu? (kontrol edilecek)
+
+---
+
+## Gelecek (şimdi değil)
+- ChatGPT / Claude hesabını bağlama: grafiği konuşarak yönetme, işlem günlüğünü yorumlatma. Kullanıcının fikri, sonraya bırakıldı.
