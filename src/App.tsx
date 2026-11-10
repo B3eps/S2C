@@ -1,14 +1,14 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { useApp, View } from './store';
 import { Emblem } from './components/Emblem';
 import { Icon, IconName } from './components/Icon';
-import { Dashboard } from './views/Dashboard';
-import { NewAccount } from './views/NewAccount';
-import { Trade } from './views/Trade';
-import { Journal } from './views/Journal';
-import { Stats } from './views/Stats';
-import { Settings } from './views/Settings';
-import { Replay } from './views/Replay';
+const Dashboard = lazy(() => import('./views/Dashboard').then((m) => ({ default: m.Dashboard })));
+const NewAccount = lazy(() => import('./views/NewAccount').then((m) => ({ default: m.NewAccount })));
+const Trade = lazy(() => import('./views/Trade').then((m) => ({ default: m.Trade })));
+const Journal = lazy(() => import('./views/Journal').then((m) => ({ default: m.Journal })));
+const Stats = lazy(() => import('./views/Stats').then((m) => ({ default: m.Stats })));
+const Settings = lazy(() => import('./views/Settings').then((m) => ({ default: m.Settings })));
+const Replay = lazy(() => import('./views/Replay').then((m) => ({ default: m.Replay })));
 import { Overlays, Notices } from './views/Overlays';
 
 const NAV: [View, string, IconName][] = [
@@ -53,13 +53,15 @@ export function App() {
         </button>
       </nav>
       <main className="main">
-        {view === 'dashboard' && <Dashboard />}
-        {view === 'new' && <NewAccount />}
-        {view === 'trade' && <Trade />}
-        {view === 'journal' && <Journal />}
-        {view === 'stats' && <Stats />}
-        {view === 'settings' && <Settings />}
-        {view === 'replay' && <Replay />}
+        <Suspense fallback={<div className="loading" role="status">Yükleniyor…</div>}>
+          {view === 'dashboard' && <Dashboard />}
+          {view === 'new' && <NewAccount />}
+          {view === 'trade' && <Trade />}
+          {view === 'journal' && <Journal />}
+          {view === 'stats' && <Stats />}
+          {view === 'settings' && <Settings />}
+          {view === 'replay' && <Replay />}
+        </Suspense>
       </main>
       <Overlays />
       <Notices />
