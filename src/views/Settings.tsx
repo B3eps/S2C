@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useApp } from '../store';
-import { exportBackup, importBackup } from '../lib/db';
+import { exportBackup, importBackup, inspectBackup } from '../lib/db';
 import { DEFAULT_RULES, Rules } from '../lib/types';
 import { play } from '../lib/sound';
 import { Icon } from '../components/Icon';
@@ -19,7 +19,7 @@ export function Settings() {
   const save = useApp((s) => s.saveSettings);
   const [rules, setRules] = useState<Rules>(settings.rules);
   const [msg, setMsg] = useState<string | null>(null);
-  const [confirmImport, setConfirmImport] = useState<File | null>(null);
+  const [confirmImport, setConfirmImport] = useState<{ file: File; accounts: number; trades: number; sessions: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const dirty = JSON.stringify(rules) !== JSON.stringify(settings.rules);
 
@@ -47,6 +47,14 @@ export function Settings() {
         <h1>Ayarlar</h1>
       </div>
       <div className="settings-grid">
+        <section className="panel">
+          <div className="panel-head"><h2>Veri kaynağı</h2></div>
+          <div className="panel-body" style={{ display: 'grid', gap: 10 }}>
+            <p><strong>Dukascopy · XAU/USD · alış (bid) mumları</strong></p>
+            <p className="muted">Geçmiş veriler bağlantı üzerinden alınır ve bilgisayarda önbelleğe kaydedilir. Emirler tek fiyat serisiyle simüle edilir; gerçek alış-satış farkı ve kayma hesaba katılmaz.</p>
+            <p className="muted">Takvim: NFP ve CPI geçmiş yayın tarihleri BLS arşivinden, FOMC tarihleri Fed takviminden alınır. NFP verileri Ocak 2023–Kasım 2026, CPI Ocak 2023–Ekim 2026, FOMC 2021–2026 ile sınırlıdır.</p>
+          </div>
+        </section>
         <section className="panel">
           <div className="panel-head">
             <h2>Hesap kuralları</h2>
@@ -146,7 +154,12 @@ export function Settings() {
                 hidden
                 onChange={(e) => {
                   const f = e.target.files?.[0];
-                  if (f) setConfirmImport(f);
+                  if (f) {
+                    setConfirmImport(null);
+                    setMsg(null);
+                    inspectBackup(f).then((data) => setConfirmImport({ file: f, accounts: data.accounts.length, trades: data.trades.length, sessions: data.sessions.length }))
+                      .catch((e: Error) => setMsg(e.message));
+                  }
                   e.target.value = '';
                 }}
               />
@@ -154,11 +167,11 @@ export function Settings() {
             {confirmImport && (
               <div className="hint-line warn-c" style={{ alignItems: 'center' }}>
                 <Icon name="warn" size={16} />
-                <span style={{ flex: 1 }}>“{confirmImport.name}” yüklenirse mevcut tüm veriler bu yedekle değiştirilir.</span>
+                <span style={{ flex: 1 }}>“{confirmImport.file.name}”: {confirmImport.accounts} hesap, {confirmImport.trades} işlem, {confirmImport.sessions} seans. Yüklenirse mevcut tüm veriler değiştirilir. Önce mevcut yedeği indirmeni öneririz.</span>
                 <button className="btn sm ghost" onClick={() => setConfirmImport(null)}>
                   Vazgeç
                 </button>
-                <button className="btn sm primary" onClick={() => doImport(confirmImport)}>
+                <button className="btn sm primary" onClick={() => doImport(confirmImport.file)}>
                   Değiştir
                 </button>
               </div>

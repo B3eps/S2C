@@ -25,7 +25,7 @@ export interface Program {
   rules: Rules;
 }
 
-const base = { split: 80, payoutMin: 0, payoutMinUsd: 150, commissionPct: 0.001 };
+const base = { rulesVersion: '2026-11-10', split: 80, payoutMin: 0, payoutMinUsd: 150, commissionPct: 0.001 };
 
 export const PROGRAMS: Program[] = [
   {
@@ -80,7 +80,8 @@ export const PROGRAMS: Program[] = [
       maxType: 'trailing',
       minDays: 0,
       payoutConsistencyPct: 35,
-      payoutBufferPct: 50,
+      payoutMinimumDailyPct: 50,
+      retainedProfitUsd: 0.01, // simulation minimum positive residual; no numeric firm buffer published
     },
   },
   {

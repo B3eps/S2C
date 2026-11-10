@@ -70,6 +70,7 @@ function Loading() {
           <>
             <Icon name="warn" size={24} style={{ color: C.warn }} />
             <p>{loading.error}</p>
+            {loading.accountId && <button className="btn primary" onClick={() => useApp.getState().startSession(loading.accountId!)}>Tekrar dene</button>}
             <button className="btn" onClick={() => go('dashboard')}>
               Panele dön
             </button>
@@ -155,7 +156,7 @@ function OrderPanel() {
   const risk = ticket ? riskOf(entry, ticket.sl, l) : undefined;
   const reward = ticket && ticket.tp !== undefined ? Math.abs(pnlOf(ticket.side, entry, ticket.tp, l)) : undefined;
   const rr = risk && reward ? reward / risk : undefined;
-  const riskPctAcc = risk ? (risk / account.balance) * 100 : undefined;
+  const riskPctAcc = risk !== undefined ? (risk / account.balance) * 100 : undefined;
   const dayRoom = session.dayStartEquity - lim.dayFloor - Math.max(0, session.dayStartEquity - live.equity);
   const tooBig = risk !== undefined && risk > dayRoom;
 
@@ -275,12 +276,13 @@ function OrderPanel() {
                 <i style={{ flex: Math.min(rr, 6), background: C.up }} />
               </div>
             )}
+            {l < 0.01 && <div className="hint-line down">0,01 lot seçilen risk bütçesini aşıyor.</div>}
             {tooBig && <div className="hint-line down">Bu risk, bugünkü kalan zarar payını ({money(Math.max(0, dayRoom))}) aşıyor.</div>}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8 }}>
               <button className="btn" onClick={() => S().cancelTicket()}>
                 İptal
               </button>
-              <button className={`btn primary`} onClick={() => S().submitTicket()}>
+              <button className={`btn primary`} disabled={l < 0.01} onClick={() => S().submitTicket()}>
                 {ticket.type === 'market' ? `${ticket.side === 'long' ? 'Long' : 'Short'} aç` : 'Emri yerleştir'}
               </button>
             </div>

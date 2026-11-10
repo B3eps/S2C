@@ -25,10 +25,9 @@ Dashboard ──► Yeni Hesap (paket seç) ──► İşlem Ekranı ──► 
 
 ### 1.1 Dashboard (açılış ekranı)
 - Hesap kartları: tip (Challenge / Funded), boyut, bakiye, durum (Aktif / Başarısız / Funded), kurallara göre ilerleme çubukları.
-- Özet: toplam sanal çekim, aktif hesap sayısı, genel kazanma oranı.
-- Isı haritası: tüm hesaplarda saat × gün başarısı.
+- Panel yalnız hesapları ve hesap yönetimini gösterir. Performans özetleri, takvim ve ısı haritası İstatistik ekranındadır.
 - "Yeni hesap" butonu.
-- Ödeme geçmişi listesi.
+- Ödeme özeti İstatistik ekranındadır.
 
 ### 1.2 Yeni Hesap
 - Paketler: 5k · 10k · 25k · 50k · 100k.
@@ -74,7 +73,7 @@ Dashboard ──► Yeni Hesap (paket seç) ──► İşlem Ekranı ──► 
 ## 2. Özellikler (kategorilere göre)
 
 ### 2.1 Veri ve gizlilik
-- Kaynak: Binance PAXG/USDT, gerçek gold mumları (ücretsiz, anahtar gerektirmez).
+- Kaynak: Dukascopy XAU/USD geçmiş bid mumları. Spread ve kayma tek seriden hesaplanmaz.
 - Fiyat ekseni yok, tarih ve saat etiketi yok.
 - Her seans geçmişte rastgele bir noktadan başlar.
 - Kâr ve zarar sadece R, % ve sanal $ olarak gösterilir. Gold fiyatı hiç görünmez.

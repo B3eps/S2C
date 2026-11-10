@@ -5,6 +5,7 @@ import { play, configureSound } from './lib/sound';
 import { atr } from './lib/indicators';
 import { money0 } from './lib/format';
 import { PROGRAMS, propDay, salePrice, stepTargets } from './lib/programs';
+import { pendingFill, positionExit, riskLots, worstEquity } from './lib/execution';
 import type { ActiveInd } from './lib/indicators';
 import {
   Account, CONTRACT, CloseReason, DEFAULT_RULES, Drawing, DrawingKind, MIN_LOT, Order, OrderType, Position, Rules,
@@ -122,7 +123,7 @@ interface State {
   settings: Settings;
   prefs: ChartPrefs;
   session: SessionRec | null;
-  loading: { progress: number; error?: string } | null;
+  loading: { progress: number; error?: string; accountId?: string } | null;
   live: Live;
   playing: boolean;
   dataWait: boolean;
@@ -185,8 +186,8 @@ export const riskOf = (entry: number, sl: number | undefined, lots: number) =>
 const roundLots = (x: number) => Math.max(MIN_LOT, Math.floor(x / MIN_LOT + 1e-9) * MIN_LOT);
 
 export function ticketLots(t: Ticket, balance: number, entry = t.entry) {
-  if (t.useRisk && t.sl !== undefined && Math.abs(entry - t.sl) > 0) {
-    return roundLots((balance * t.riskPct) / 100 / (Math.abs(entry - t.sl) * CONTRACT));
+  if (t.useRisk && t.sl !== undefined) {
+    return riskLots(balance * t.riskPct / 100, Math.abs(entry - t.sl));
   }
   return roundLots(t.manualLots);
 }
@@ -205,10 +206,10 @@ export function accountLimits(a: Account, s: SessionRec | null) {
   const maxAmt = (size * a.rules.maxLoss) / 100;
   // trailing: rises with the closed balance, never falls, locks at the initial balance
   const maxFloor = a.rules.maxType === 'trailing' ? Math.min(size, Math.max(size - maxAmt, (a.peak ?? size) - maxAmt)) : size - maxAmt;
-  const buffer = ((a.rules.payoutBufferPct ?? 0) / 100) * ((size * a.rules.dailyLoss) / 100);
+  const buffer = (a.rules.retainedProfitUsd ?? 0) + ((a.rules.payoutBufferPct ?? 0) / 100) * ((size * a.rules.dailyLoss) / 100);
   const targetPct = targets[step];
   const target = size * (1 + targetPct / 100);
-  const minGross = (a.rules.payoutMinUsd ?? 0) / (a.rules.split / 100);
+  const minGross = Math.max(a.rules.payoutMinUsd ?? 0, size * a.rules.dailyLoss * (a.rules.payoutMinimumDailyPct ?? 0) / 10000) / (a.rules.split / 100);
   const payoutAt = Math.max(size * (1 + a.rules.payoutMin / 100), size + buffer + minGross, size + 0.01);
   return { dayFloor, maxFloor, target, targetPct, step, steps: targets.length, payoutAt, buffer };
 }
@@ -258,15 +259,10 @@ export function passBlocker(a: Account, openPositions: number): string | null {
   return null;
 }
 
-const persistSession = (() => {
-  let t: number | undefined;
-  return (s: SessionRec | null, now = false) => {
-    if (!s) return;
-    clearTimeout(t);
-    if (now) db.putSession(s);
-    else t = window.setTimeout(() => db.putSession(s), 1500);
-  };
-})();
+function persistSession(session: SessionRec | null, _immediate = true) {
+  if (session) void db.putSession(structuredClone(session)).catch(() =>
+    useApp.getState().showToast('Seans kaydedilemedi. Tarayıcı depolamasını kontrol et.', 'warn'));
+}
 
 const accountNo = (existing: Account[]) => {
   const n = existing.reduce((m, a) => Math.max(m, parseInt(a.no.replace(/^S2C-/, ''), 10) || 0), 0);
@@ -317,7 +313,7 @@ export const useApp = create<State>((set, get) => {
           if (j.kind === 'open' && j.posId) {
             const s = get().session;
             const p = s?.positions.find((x) => x.id === j.posId);
-            if (p) p.shotOpen = id;
+            if (p && s) { p.shotOpen = id; persistSession(s, true); }
             const t = get().trades.find((x) => x.id === j.posId);
             if (t && !t.shotOpen) {
               t.shotOpen = id;
@@ -353,7 +349,8 @@ export const useApp = create<State>((set, get) => {
     if (!feed || !s || !a) return get().live;
     const price = feed.price;
     const floating = s.positions.reduce((acc, p) => acc + pnlOf(p.side, p.entry, price, p.lots), 0);
-    const equity = a.balance + floating;
+    const entryFees = s.positions.reduce((fee, p) => fee + p.entry * p.lots * CONTRACT * (a.rules.commissionPct ?? 0) / 100, 0);
+    const equity = a.balance + floating - entryFees;
     return {
       price,
       clock: feed.clock,
@@ -383,6 +380,7 @@ export const useApp = create<State>((set, get) => {
       sl: p.sl,
       tp: p.tp,
       initialSl: p.initialSl,
+      levels: p.levels,
       openedAt: p.openedAt,
       closedAt: at,
       pnl,
@@ -397,7 +395,8 @@ export const useApp = create<State>((set, get) => {
     s.positions = s.positions.filter((x) => x.id !== p.id);
     a.balance += pnl;
     a.peak = Math.max(a.peak ?? a.size, a.balance);
-    db.putTrade(trade);
+    s.clockMs = at;
+    void db.commitClose(a, s, trade).catch(() => get().showToast('İşlem kaydedilemedi. Verilerini kontrol edip yedek al.', 'warn'));
     set({
       trades: [...get().trades.filter((t) => t.id !== trade.id), trade],
       sessionTrades: [...get().sessionTrades, trade],
@@ -416,7 +415,7 @@ export const useApp = create<State>((set, get) => {
   const openPos = (side: Side, lots: number, entry: number, sl: number | undefined, tp: number | undefined, type: OrderType, at: number) => {
     const s = get().session!;
     const a = account()!;
-    const p: Position = { id: uid(), side, lots, entry, sl, tp, initialSl: sl, riskLocked: sl !== undefined, openedAt: at, orderType: type };
+    const p: Position = { id: uid(), side, lots, entry, sl, tp, levels: [{ at, sl, tp }], initialSl: sl, riskLocked: sl !== undefined, openedAt: at, orderType: type };
     s.positions.push(p);
     const key = `${s.id}:${propDay(at)}`;
     if (!a.tradingDays.includes(key)) a.tradingDays.push(key);
@@ -450,41 +449,34 @@ export const useApp = create<State>((set, get) => {
     s.lastPrice = m.c;
 
     // pending orders
+    const filled = new Map<string, boolean>();
     for (const o of [...s.orders]) {
-      let fill: number | undefined;
-      if (o.side === 'long') {
-        if (o.type === 'limit' && m.l <= o.price) fill = Math.min(m.o, o.price);
-        if (o.type === 'stop' && m.h >= o.price) fill = Math.max(m.o, o.price);
-      } else {
-        if (o.type === 'limit' && m.h >= o.price) fill = Math.max(m.o, o.price);
-        if (o.type === 'stop' && m.l <= o.price) fill = Math.min(m.o, o.price);
-      }
+      const fill = pendingFill(o, m);
       if (fill !== undefined) {
         s.orders = s.orders.filter((x) => x.id !== o.id);
         const p = openPos(o.side, o.lots, fill, o.sl, o.tp, o.type, at);
         p.openedAt = m.t;
+        filled.set(p.id, fill === m.o);
         if (get().editing?.id === o.id) set({ editing: { kind: 'pos', id: p.id } });
       }
     }
 
     // exits: stop first when both are touched inside one minute (conservative)
     for (const p of [...s.positions]) {
-      if (p.openedAt === m.t) continue;
-      const long = p.side === 'long';
-      const slHit = p.sl !== undefined && (long ? m.l <= p.sl : m.h >= p.sl);
-      const tpHit = p.tp !== undefined && (long ? m.h >= p.tp : m.l <= p.tp);
-      if (slHit) closePos(p, long ? Math.min(m.o, p.sl!) : Math.max(m.o, p.sl!), 'sl', at);
-      else if (tpHit) closePos(p, long ? Math.max(m.o, p.tp!) : Math.min(m.o, p.tp!), 'tp', at);
+      if (p.openedAt === m.t && !filled.has(p.id)) continue;
+      const exit = positionExit(p, m, filled.has(p.id), filled.get(p.id) ?? false);
+      if (exit) closePos(p, exit.price, exit.reason, at);
     }
 
     // rules on worst intrabar equity
-    const worst = a.balance + s.positions.reduce((acc, p) => acc + pnlOf(p.side, p.entry, p.side === 'long' ? m.l : m.h, p.lots), 0);
+    const entryFees = s.positions.reduce((fee, p) => fee + p.entry * p.lots * CONTRACT * (a.rules.commissionPct ?? 0) / 100, 0);
+    const worst = worstEquity(a.balance - entryFees, s.positions, m);
     const lim = accountLimits(a, s);
     const live = get().live;
     set({ live: { ...live, worstEquity: Math.min(live.worstEquity, worst) } });
     let breach: string | null = null;
-    if (worst <= lim.dayFloor) breach = `Günlük zarar limiti aşıldı (%${a.rules.dailyLoss}).`;
-    else if (worst <= lim.maxFloor) breach = `Toplam zarar limiti aşıldı (%${a.rules.maxLoss}).`;
+    if (worst < lim.dayFloor) breach = `Günlük zarar limiti ${money0(lim.dayFloor - worst)} aşıldı (%${a.rules.dailyLoss}).`;
+    else if (worst < lim.maxFloor) breach = `Toplam zarar limiti ${money0(lim.maxFloor - worst)} aşıldı (%${a.rules.maxLoss}).`;
     if (breach) {
       for (const p of [...s.positions]) closePos(p, m.c, 'violation', at);
       s.orders = [];
@@ -657,6 +649,7 @@ export const useApp = create<State>((set, get) => {
         s = {
           id: uid(),
           accountId,
+          dataSource: 'dukascopy-xauusd-bid',
           startMs: start,
           clockMs: start,
           startedAt: Date.now(),
@@ -667,16 +660,16 @@ export const useApp = create<State>((set, get) => {
           dayKey: propDay(start),
         };
       }
-      set({ view: 'trade', loading: { progress: 0 }, session: null, ticket: null, tool: 'cursor', playing: false, showPrice: false });
+      set({ view: 'trade', loading: { progress: 0, accountId }, session: null, ticket: null, tool: 'cursor', playing: false, showPrice: false });
       try {
         localStorage.setItem('s2c:view', 'trade');
       } catch {
         /* ignore */
       }
       try {
-        feed = await Feed.create(s.startMs, s.clockMs, (p) => set({ loading: { progress: p } }));
+        feed = await Feed.create(s.startMs, s.clockMs, (p) => set({ loading: { progress: p, accountId } }));
       } catch {
-        set({ loading: { progress: 0, error: 'Piyasa verisi alınamadı. İnternet bağlantını kontrol edip tekrar dene.' } });
+        set({ loading: { progress: 0, accountId, error: 'Piyasa verisi alınamadı veya doğrulanamadı. Bağlantını kontrol edip tekrar dene.' } });
         return;
       }
       if (fresh) {
@@ -694,6 +687,7 @@ export const useApp = create<State>((set, get) => {
         live: { price: feed.price, clock: feed.clock, equity: a.balance, floating: 0, dayLoss: 0, worstEquity: Infinity },
       });
       set({ live: computeLive() });
+      if (feed.hasGaps) get().showToast('Veride boşluklar var; piyasa arası veya eksik mum olabilir.', 'warn');
       marketBus.emit('reset');
     },
 
@@ -739,6 +733,7 @@ export const useApp = create<State>((set, get) => {
       let revealed = 0;
       for (let i = 0; i < n; i++) {
         if (!feed.step()) {
+          if (feed.loadError) { feed.loadError = false; get().setPlaying(false); get().showToast('Veri yüklenemedi. Sonraki mum düğmesiyle tekrar deneyebilirsin.', 'warn'); }
           if (feed.exhausted) {
             get().endSession('data');
             return;
@@ -759,6 +754,7 @@ export const useApp = create<State>((set, get) => {
       let revealed = 0;
       for (let guard = 0; guard < 2000; guard++) {
         if (!feed.step()) {
+          if (feed.loadError) { feed.loadError = false; get().setPlaying(false); get().showToast('Veri yüklenemedi. Sonraki mum düğmesiyle tekrar deneyebilirsin.', 'warn'); }
           if (feed.exhausted) {
             get().endSession('data');
             return;
@@ -868,6 +864,10 @@ export const useApp = create<State>((set, get) => {
       if (!t || !s || !a || !feed) return;
       const live = feed.price;
       const lotsN = ticketLots(t, a.balance, t.type === 'market' ? live : t.entry);
+      if (!Number.isFinite(lotsN) || lotsN < MIN_LOT) {
+        get().showToast('Risk bütçesi 0,01 lot için yetersiz.', 'warn');
+        return;
+      }
       if (t.type === 'market') {
         const long = t.side === 'long';
         // a level the price has already crossed would fire at once: drop it and say so
@@ -989,6 +989,7 @@ export const useApp = create<State>((set, get) => {
       const h = target.kind === 'pos' ? s.positions.find((x) => x.id === target.id) : s.orders.find((x) => x.id === target.id);
       if (!h) return;
       h[f] = undefined;
+      if ('levels' in h && h.levels && feed) h.levels.push({ at: feed.clock, sl: h.sl, tp: h.tp });
       set({ session: { ...s } });
       persistSession(s, true);
       play('cancel');
@@ -1020,6 +1021,8 @@ export const useApp = create<State>((set, get) => {
     commitLine() {
       const s = get().session;
       s?.positions.forEach((p) => {
+        const last = p.levels?.at(-1);
+        if (feed && last && (last.sl !== p.sl || last.tp !== p.tp)) p.levels!.push({ at: feed.clock, sl: p.sl, tp: p.tp });
         if (p.sl !== undefined && !p.riskLocked) {
           p.initialSl = p.sl;
           p.riskLocked = true;

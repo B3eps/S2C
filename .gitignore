@@ -1,3 +1,9 @@
+/.local-saves/
+/output/
+/tmp/
+.env*
+*.tsbuildinfo
+s2c-yedek-*.json
 node_modules
 dist
 .impeccable/review

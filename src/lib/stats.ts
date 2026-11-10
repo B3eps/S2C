@@ -14,7 +14,7 @@ export interface Summary {
   maxDD: number;
   bestStreak: number;
   worstStreak: number;
-  curve: { i: number; v: number; t: number }[];
+  curve: { i: number; v: number; t: number; tradeId?: string; pnl?: number }[];
 }
 
 export function summarize(trades: Trade[]): Summary {
@@ -25,7 +25,7 @@ export function summarize(trades: Trade[]): Summary {
   const grossL = -losses.reduce((a, t) => a + t.pnl, 0);
   const withR = ts.filter((t) => t.r !== undefined && isFinite(t.r));
   let eq = 0, peak = 0, maxDD = 0, run = 0, best = 0, worst = 0;
-  const curve = [{ i: 0, v: 0, t: ts[0]?.realClosedAt ?? 0 }];
+  const curve: Summary['curve'] = [{ i: 0, v: 0, t: ts[0]?.realClosedAt ?? 0 }];
   ts.forEach((t, i) => {
     eq += t.pnl;
     peak = Math.max(peak, eq);
@@ -34,7 +34,7 @@ export function summarize(trades: Trade[]): Summary {
     else if (t.pnl < 0) run = run < 0 ? run - 1 : -1;
     best = Math.max(best, run);
     worst = Math.min(worst, run);
-    curve.push({ i: i + 1, v: eq, t: t.realClosedAt });
+    curve.push({ i: i + 1, v: eq, t: t.realClosedAt, tradeId: t.id, pnl: t.pnl });
   });
   return {
     count: ts.length,

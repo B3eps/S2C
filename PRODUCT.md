@@ -21,8 +21,8 @@ Blind replay: real market data with every absolute reference (price, date) remov
 ## Operating Context
 - Sessions start at a random historical point; weekend candles are hidden.
 - Lot standard follows cTrader XAUUSD: 1 lot = 100 oz, min 0.01.
-- Prop rules will later be copied from the firm the user trades with ("bem funding"); until then they are editable defaults. That firm's name and logo are never used.
-- Data source: Binance PAXG/USDT public market data.
+- New accounts copy a versioned BEM program or custom rules. Funded-account news, risk guard and payout timing restrictions are not fully simulated.
+- Data source: Dukascopy historical XAU/USD bid candles via dukascopy-node and a local Vite endpoint. Replay currently uses one price series; bid/ask spread and slippage are not simulated.
 
 ## Capabilities and Constraints
 Dashboard, challenge packages (5k–100k), live rule tracking, violation, funded, payouts; blind chart with replay, multi-timeframe, session clock, economic event markers; market/limit/stop orders placed and dragged on the chart; risk calculator; TradingView-style indicator set (phased); drawing tools; journal with automatic screenshots; trade replay; statistics and heatmap; local backup export/import. UI language: Turkish. Nothing outside PLAN.md is added without the user's approval.

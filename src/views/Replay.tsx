@@ -63,12 +63,15 @@ export function Replay() {
     const ms = TF_MS[trade.tf];
     const open = lastT + ms > trade.openedAt;
     const closed = lastT + ms > trade.closedAt;
+    const level = trade.levels?.filter(v => v.at <= lastT + ms).at(-1);
+    const sl = level ? level.sl : trade.initialSl ?? trade.sl;
+    const tp = level ? level.tp : trade.tp;
     ctrl.syncLines(
       open && !closed
         ? [
             { key: 'e', price: trade.entry, color: trade.side === 'long' ? C.up : C.down, dashed: false },
-            ...(trade.sl !== undefined ? [{ key: 'sl', price: trade.initialSl ?? trade.sl, color: C.down, dashed: true }] : []),
-            ...(trade.tp !== undefined ? [{ key: 'tp', price: trade.tp, color: C.up, dashed: true }] : []),
+            ...(sl !== undefined ? [{ key: 'sl', price: sl, color: C.down, dashed: true }] : []),
+            ...(tp !== undefined ? [{ key: 'tp', price: tp, color: C.up, dashed: true }] : []),
           ]
         : [],
     );

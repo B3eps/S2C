@@ -25,6 +25,7 @@ async function candles(req: IncomingMessage, res: ServerResponse) {
       instrument: 'xauusd',
       dates: { from: new Date(from), to: new Date(to) },
       timeframe: TF[tf],
+      priceType: 'bid',
       format: 'json',
       volumes: true,
       ignoreFlats: true,

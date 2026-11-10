@@ -18,8 +18,18 @@ async function fetchCandles(tf: TF, from: number, to: number): Promise<Bar[]> {
     try {
       const res = await fetch(`/api/candles?tf=${tf}&from=${Math.floor(from)}&to=${Math.floor(to)}`);
       if (!res.ok) throw new Error(`XAU ${res.status}`);
-      const raw = (await res.json()) as number[][];
-      return raw.map(([t, o, h, l, c, v]) => ({ t, o, h, l, c, v })).filter((b) => !isClosed(b.t));
+      const raw: unknown = await res.json();
+      if (!Array.isArray(raw)) throw new Error('Geçersiz mum verisi');
+      let previous = -Infinity;
+      const bars: Bar[] = [];
+      for (const row of raw) {
+        if (!Array.isArray(row) || row.length < 6 || !row.every((v) => typeof v === 'number' && Number.isFinite(v))) throw new Error('Geçersiz mum verisi');
+        const [t, o, h, l, c, v] = row;
+        if (t < from || t >= to || t <= previous || h < Math.max(o, c, l) || l > Math.min(o, c, h) || v < 0) throw new Error('Mum verisi tutarsız');
+        previous = t;
+        if (!isClosed(t)) bars.push({ t, o, h, l, c, v });
+      }
+      return bars;
     } catch (e) {
       lastErr = e;
       await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
@@ -28,7 +38,22 @@ async function fetchCandles(tf: TF, from: number, to: number): Promise<Bar[]> {
   throw lastErr;
 }
 
-export const fetchRange = fetchCandles;
+/** Historical candles may only use minutes closed by the exclusive replay cutoff. */
+export async function fetchRange(tf: TF, from: number, to: number): Promise<Bar[]> {
+  const bucket = Math.floor(to / TF_MS[tf]) * TF_MS[tf];
+  const [history, tail] = await Promise.all([
+    bucket > from ? fetchCandles(tf, from, bucket) : Promise.resolve([] as Bar[]),
+    tf !== '1m' && bucket >= from && to - bucket >= MIN
+      ? fetchCandles('1m', bucket, Math.floor(to / MIN) * MIN)
+      : Promise.resolve([] as Bar[]),
+  ]);
+  if (!tail.length) return history;
+  return history.concat({
+    t: bucket, o: tail[0].o, h: Math.max(...tail.map(b => b.h)),
+    l: Math.min(...tail.map(b => b.l)), c: tail[tail.length - 1].c,
+    v: tail.reduce((total, b) => total + b.v, 0),
+  });
+}
 
 /** Last `count` closed bars that opened before `end`. */
 async function fetchBefore(tf: TF, end: number, count: number): Promise<Bar[]> {
@@ -61,10 +86,12 @@ export class Feed {
   agg = {} as Record<TF, Bar[]>;
   base0: number;
   exhausted = false;
+  hasGaps = false;
   private loading: Promise<void> | null = null;
+  loadError = false;
 
   private constructor(public startMs: number) {
-    this.base0 = Math.floor(startMs / TF_MS['4h']) * TF_MS['4h'];
+    this.base0 = Math.floor(startMs / TF_MS['4h']) * TF_MS['4h'] - TF_MS['4h'];
     for (const tf of TFS) this.agg[tf] = [];
   }
 
@@ -81,6 +108,7 @@ export class Feed {
     await f.loadMore(Math.max(clockMs, startMs) + 2 * DAY);
     tick();
     f.advanceTo(clockMs);
+    if (f.ci < 0) throw new Error('Seans için mum verisi bulunamadı');
     return f;
   }
 
@@ -93,6 +121,11 @@ export class Feed {
       const to = Math.min(this.cursor + 2 * DAY, now);
       const chunk = await fetchCandles('1m', this.cursor, to);
       const last = this.minutes[this.minutes.length - 1];
+      let prev = last;
+      for (const b of chunk) {
+        if (prev && b.t - prev.t > 6 * MIN && b.t - prev.t <= 4 * 3_600_000 && !isClosed(prev.t + MIN) && !isClosed(b.t - MIN)) this.hasGaps = true;
+        prev = b;
+      }
       this.minutes.push(...(last ? chunk.filter((b) => b.t > last.t) : chunk));
       this.cursor = to;
     }
@@ -103,8 +136,9 @@ export class Feed {
   ensureAhead() {
     if (this.loading || this.exhausted) return this.loading;
     if (this.minutes.length - this.ci > 3000) return null;
+    this.loadError = false;
     this.loading = this.loadMore(this.cursor + 4 * DAY)
-      .catch(() => undefined)
+      .catch(() => { this.loadError = true; })
       .finally(() => (this.loading = null));
     return this.loading;
   }
@@ -135,15 +169,13 @@ export class Feed {
       this.ci++;
       this.push(this.minutes[this.ci]);
     }
-    if (this.ci < 0 && this.minutes.length) {
-      this.ci = 0;
-      this.push(this.minutes[0]);
-    }
+
   }
 
   /** Reveal the next 1-minute bar. Returns null when data is not loaded yet. */
   step(): Bar | null {
-    this.ensureAhead();
+    if (this.loadError && this.ci + 1 >= this.minutes.length) return null;
+    if (!this.loadError) this.ensureAhead();
     if (this.ci + 1 >= this.minutes.length) return null;
     this.ci++;
     const m = this.minutes[this.ci];

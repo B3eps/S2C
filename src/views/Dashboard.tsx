@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { useApp, payoutBlocker } from '../store';
+import { useApp, payoutBlocker, accountLimits } from '../store';
 import { CertLabel, RuleGauges } from '../components/bits';
 import { Icon } from '../components/Icon';
 import { Emblem } from '../components/Emblem';
-import { money, signedMoney, sizeLabel, wallDate, wallDateTime } from '../lib/format';
+import { money, wallDateTime } from '../lib/format';
 import type { Account } from '../lib/types';
 
 type Tab = 'active' | 'funded' | 'violated' | 'archived';
@@ -24,28 +24,16 @@ export function Dashboard() {
   const S = useApp.getState;
   const [tab, setTab] = useState<Tab>(() => (accounts.some((a) => inTab(a, 'active')) ? 'active' : accounts.some((a) => inTab(a, 'funded')) ? 'funded' : 'active'));
 
-  const spent = accounts.reduce((s, a) => s + (a.fee ?? 0), 0);
-  const earned = accounts.reduce((s, a) => s + a.payouts.reduce((x, p) => x + p.amount, 0), 0);
-  const ledger = [
-    ...accounts.filter((a) => a.fee).map((a) => ({ id: 'f' + a.id, at: a.createdAt, no: a.no, size: a.size, what: `Hesap alımı · ${a.programName ?? ''}`, amount: -(a.fee ?? 0) })),
-    ...accounts.flatMap((a) => a.payouts.map((p) => ({ id: p.id, at: p.at, no: a.no, size: a.size, what: 'Ödeme (senin payın)', amount: p.amount }))),
-  ].sort((x, y) => y.at - x.at);
-
   if (!accounts.length) {
     return (
-      <div className="page">
-        <div className="first-run">
-          <div className="inner">
-            <Emblem width={168} />
-            <h1>Henüz bir hesabın yok</h1>
-            <p>
-              Bir değerlendirme hesabı aç. Geçmişten rastgele bir anda, fiyat ve tarih gizliyken XAUUSD işlemi yaparsın. Kuralları aşmadan hedefe ulaşırsan hesap
-              fonlanır ve sanal ödeme çekebilirsin.
-            </p>
-            <button className="btn primary lg" onClick={() => S().go('new')}>
-              <Icon name="plus" size={18} /> İlk hesabını aç
-            </button>
-          </div>
+      <div className="page dashboard-start">
+        <div className="dashboard-start-head"><div><h1>Hesaplar</h1><p>Fon hesapların</p></div><button className="btn primary" onClick={() => S().go('new')}><Icon name="plus" size={16} /> Yeni hesap</button></div>
+        <div className="dashboard-start-layout">
+          <section className="panel dashboard-start-main">
+            <div className="dashboard-start-brand"><Emblem width={88} /><span>XAUUSD · Kör replay</span></div>
+            <div><h2>Henüz bir hesabın yok</h2><p>Bir hesap oluştur; durumunu, kurallarını ve ilerlemeni buradan takip et.</p></div>
+            <button className="btn primary lg" onClick={() => S().go('new')}><Icon name="plus" size={18} /> Hesap seç</button>
+          </section>
         </div>
       </div>
     );
@@ -54,27 +42,17 @@ export function Dashboard() {
   const list = accounts.filter((a) => inTab(a, tab));
 
   return (
-    <div className="page">
-      <div className="page-head">
-        <h1>Hesaplar</h1>
-        <div className="ledger">
-          <span>
-            Harcanan <b className="down">{money(spent)}</b>
-          </span>
-          <span>
-            Çekilen <b className="up">{money(earned)}</b>
-          </span>
-          <span>
-            Net <b className={earned - spent >= 0 ? 'up' : 'down'}>{signedMoney(earned - spent)}</b>
-          </span>
-        </div>
+    <div className="page accounts-page">
+      <div className="page-head accounts-head">
+        <div><h1>Hesaplar</h1><p>Fon hesaplarını ve kurallarını buradan takip et.</p></div>
         <div className="grow" />
         <button className="btn primary" onClick={() => S().go('new')}>
           <Icon name="plus" size={16} /> Yeni hesap
         </button>
       </div>
       <div className="page-body">
-        <div className="tabs-row" role="tablist">
+        <div className="accounts-list-head"><div><h2>Hesaplarım</h2><span>{list.length} hesap</span></div><p>Hesap durumuna göre görüntüle</p></div>
+        <div className="tabs-row accounts-tabs" role="tablist" aria-label="Hesap durumu">
           {TABS.map(([t, label]) => (
             <button key={t} className="tab" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
               {label} <span className="count">{accounts.filter((a) => inTab(a, t)).length}</span>
@@ -92,7 +70,9 @@ export function Dashboard() {
                 </button>
               );
               return (
-                <div key={a.id} className="acct">
+                <div key={a.id} className="acct account-card">
+                  <div className="account-card-top"><span>{a.phase === 'challenge' && !a.archived && a.status === 'active'
+                    ? `Hedefe kalan ${money(Math.max(0, accountLimits(a, null).target - a.balance))}` : a.programName || 'Özel hesap'}</span><span className={`account-status ${a.status === 'violated' ? 'down' : ''}`}>{a.archived ? 'Arşivde' : a.status === 'violated' ? 'İhlal' : a.phase === 'funded' ? 'Fonlu' : 'Değerlendirmede'}</span></div>
                   <CertLabel a={a} />
                   <div className="acct-foot">
                     {a.status === 'violated' || a.archived ? (
@@ -134,38 +114,6 @@ export function Dashboard() {
           </div>
         )}
 
-        <section className="panel">
-          <div className="panel-head">
-            <h2>Para hareketleri</h2>
-            <span className="muted">hesap alımları %40 indirimli fiyattan</span>
-          </div>
-          {ledger.length ? (
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>Tarih</th>
-                  <th>Hesap</th>
-                  <th>Hareket</th>
-                  <th className="r">Tutar</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ledger.map((p) => (
-                  <tr key={p.id}>
-                    <td>{wallDate(p.at)}</td>
-                    <td>
-                      {p.no} <span className="muted">· {sizeLabel(p.size)}</span>
-                    </td>
-                    <td>{p.what}</td>
-                    <td className={`r ${p.amount >= 0 ? 'up' : 'down'}`}>{signedMoney(p.amount)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <div className="empty">Hesap aldıkça ve ödeme çektikçe burada görünür.</div>
-          )}
-        </section>
       </div>
     </div>
   );

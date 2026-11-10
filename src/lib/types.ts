@@ -32,7 +32,9 @@ export interface Order {
   createdAt: number;
 }
 
+export interface LevelChange { at: number; sl?: number; tp?: number }
 export interface Position {
+  levels?: LevelChange[];
   id: string;
   side: Side;
   lots: number;
@@ -50,6 +52,7 @@ export interface Position {
 export type CloseReason = 'tp' | 'sl' | 'manual' | 'session' | 'violation';
 
 export interface Trade {
+  levels?: LevelChange[];
   id: string;
   accountId: string;
   sessionId: string;
@@ -98,6 +101,9 @@ export interface Rules {
   payoutConsistencyPct?: number;
   /** payout must leave this % of the daily drawdown amount above the initial balance */
   payoutBufferPct?: number;
+  rulesVersion?: string;
+  payoutMinimumDailyPct?: number;
+  retainedProfitUsd?: number;
   /** traded days needed since activation / the last payout before a payout */
   payoutMinDays?: number;
 }
@@ -159,6 +165,7 @@ export interface Drawing {
 }
 
 export interface SessionRec {
+  dataSource?: 'dukascopy-xauusd-bid';
   id: string;
   accountId: string;
   startMs: number;

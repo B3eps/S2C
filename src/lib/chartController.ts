@@ -214,7 +214,7 @@ export class ChartController {
   }
 
   private scheduleIndicators() {
-    if (this.indRaf) return;
+    if (!this.inds.length || this.indRaf) return;
     this.indRaf = requestAnimationFrame(() => {
       this.indRaf = 0;
       this.recomputeIndicators();

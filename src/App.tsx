@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useApp, View } from './store';
 import { Emblem } from './components/Emblem';
 import { Icon, IconName } from './components/Icon';
@@ -25,10 +25,12 @@ export function App() {
   const toast = useApp((s) => s.toast);
   const go = useApp((s) => s.go);
 
+  const [bootError, setBootError] = useState(false);
   useEffect(() => {
-    useApp.getState().boot();
+    useApp.getState().boot().catch(() => setBootError(true));
   }, []);
 
+  if (bootError) return <main className="loading"><div className="inner"><h1>Kayıtlar açılamadı</h1><p>Tarayıcının yerel depolama iznini ve boş alanı kontrol et.</p><button className="btn" onClick={() => location.reload()}>Tekrar dene</button></div></main>;
   if (!ready) return null;
   const current = view === 'new' ? 'dashboard' : view === 'replay' ? 'journal' : view;
   return (

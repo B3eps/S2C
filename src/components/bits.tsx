@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Account, SessionRec, Trade } from '../lib/types';
 import { accountLimits, countedDays, passBlocker } from '../store';
-import { money, money0, pct, plainPct, sizeLabel } from '../lib/format';
+import { money, money0, pct, plainPct, sizeLabel, wallDate } from '../lib/format';
 import { heatGrid, HeatMetric, WEEKDAYS } from '../lib/stats';
 import { C } from '../lib/theme';
 
@@ -11,6 +11,7 @@ export function CountUp({ value, format, className }: { value: number; format: (
   const from = useRef(value);
   const raf = useRef(0);
   useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { setShown(value); return; }
     const start = performance.now();
     const a = shown;
     from.current = a;
@@ -168,7 +169,7 @@ export function CertLabel({ a, compact, className = '', stampAnim }: { a: Accoun
 }
 
 /** Cumulative P&L curve with zero line and drawdown shading. */
-export function EquityCurve({ points, height = 200 }: { points: { i: number; v: number }[]; height?: number }) {
+export function EquityCurve({ points, height = 200 }: { points: { i: number; v: number; t?: number; tradeId?: string; pnl?: number }[]; height?: number }) {
   const ref = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(600);
   const [hover, setHover] = useState<number | null>(null);
@@ -177,25 +178,28 @@ export function EquityCurve({ points, height = 200 }: { points: { i: number; v: 
     if (ref.current) ro.observe(ref.current);
     return () => ro.disconnect();
   }, []);
-  if (points.length < 2) return <div className="empty">Henüz kapanmış işlem yok.</div>;
   const pad = { l: 8, r: 8, t: 12, b: 18 };
-  const vs = points.map((p) => p.v);
-  const lo = Math.min(0, ...vs);
-  const hi = Math.max(0, ...vs);
+  const { lo, hi, d, belowPeak } = useMemo(() => {
+    let lo = 0, hi = 0;
+    for (const p of points) { lo = Math.min(lo, p.v); hi = Math.max(hi, p.v); }
+    const span = hi - lo || 1;
+    const x = (i: number) => pad.l + (i / Math.max(1, points.length - 1)) * (w - pad.l - pad.r);
+    const y = (v: number) => pad.t + (1 - (v - lo) / span) * (height - pad.t - pad.b);
+    const d = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.v).toFixed(1)}`).join('');
+    let peak = -Infinity;
+    const peakPts: string[] = [];
+    points.forEach((p, i) => {
+      if (i) peakPts.push(`L${x(i).toFixed(1)} ${y(peak).toFixed(1)}`);
+      peak = Math.max(peak, p.v);
+      peakPts.push(`${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(peak).toFixed(1)}`);
+    });
+    const bottom = height - pad.b;
+    return { lo, hi, d, belowPeak: peakPts.join('') + `L${x(points.length - 1)} ${bottom}L${x(0)} ${bottom}Z` };
+  }, [points, w, height]);
+  if (points.length < 2) return <div className="empty">Henüz kapanmış işlem yok.</div>;
   const span = hi - lo || 1;
   const X = (i: number) => pad.l + (i / (points.length - 1)) * (w - pad.l - pad.r);
   const Y = (v: number) => pad.t + (1 - (v - lo) / span) * (height - pad.t - pad.b);
-  const d = points.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)} ${Y(p.v).toFixed(1)}`).join('');
-  // drawdown = region below the running peak and above the curve
-  let peak = -Infinity;
-  const peakPts: string[] = [];
-  points.forEach((p, i) => {
-    if (i) peakPts.push(`L${X(i).toFixed(1)} ${Y(peak).toFixed(1)}`);
-    peak = Math.max(peak, p.v);
-    peakPts.push(`${i ? 'L' : 'M'}${X(i).toFixed(1)} ${Y(peak).toFixed(1)}`);
-  });
-  const bottom = height - pad.b;
-  const belowPeak = peakPts.join('') + `L${X(points.length - 1)} ${bottom}L${X(0)} ${bottom}Z`;
   const aboveCurve = d + `L${X(points.length - 1)} ${pad.t}L${X(0)} ${pad.t}Z`;
   const last = points[points.length - 1].v;
   const col = last >= 0 ? C.up : C.down;
@@ -213,6 +217,7 @@ export function EquityCurve({ points, height = 200 }: { points: { i: number; v: 
       onMouseLeave={() => setHover(null)}
     >
       <svg height={height} viewBox={`0 0 ${w} ${height}`}>
+        {[0.25, 0.5, 0.75].map((p) => <line key={p} x1={pad.l} x2={w - pad.r} y1={pad.t + p * (height - pad.t - pad.b)} y2={pad.t + p * (height - pad.t - pad.b)} stroke={C.rule} />)}
         <line x1={pad.l} x2={w - pad.r} y1={Y(0)} y2={Y(0)} stroke={C.rule} strokeDasharray="3 3" />
         <clipPath id="dd-clip">
           <path d={aboveCurve} />
@@ -226,7 +231,7 @@ export function EquityCurve({ points, height = 200 }: { points: { i: number; v: 
           </>
         )}
         <text x={pad.l} y={height - 4} fill={C.ink3} fontSize={11}>
-          0
+          {points[1]?.t ? wallDate(points[1].t) : '0'}
         </text>
         {[hi, 0, lo]
           .filter((v, i, a) => a.indexOf(v) === i)
@@ -236,12 +241,13 @@ export function EquityCurve({ points, height = 200 }: { points: { i: number; v: 
             </text>
           ))}
         <text x={w - pad.r} y={height - 4} fill={C.ink3} fontSize={11} textAnchor="end">
-          {points.length - 1}
+          {points[points.length - 1].t ? wallDate(points[points.length - 1].t!) : points.length - 1}
         </text>
       </svg>
       {hp && (
         <div className="tip" style={{ position: 'absolute', left: Math.min(X(hover!) + 10, w - 140), top: 0 }}>
-          İşlem {hp.i}: <b className={hp.v >= 0 ? 'up' : 'down'}>{money(hp.v)}</b>
+          {hp.t && hp.i > 0 ? `${wallDate(hp.t)} · ` : ''}İşlem {hp.i}: <b className={hp.v >= 0 ? 'up' : 'down'}>{money(hp.v)}</b>
+          {hp.pnl !== undefined && <div>İşlem sonucu: {money(hp.pnl)}</div>}
         </div>
       )}
     </div>

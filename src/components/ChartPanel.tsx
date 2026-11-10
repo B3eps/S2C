@@ -188,22 +188,38 @@ export function ChartPanel({ index }: { index: number }) {
     ctrl.setPriceMode(useApp.getState().showPrice, useApp.getState().session?.firstPrice ?? 0);
     const f = getFeed();
     if (f) {
-      ctrl.reset(f.bars(tf), tf);
-      setBarsLen(f.bars(tf).length);
+      const bars = f.bars(tf);
+      ctrl.reset(bars, tf);
+      setBarsLen(bars.length);
     }
     if (primary) shooter.fn = () => ctrl.screenshot();
     let sig = '';
     let raf = 0;
-    const loop = () => {
-      const s = ctrl.signature();
-      if (s !== sig) {
-        sig = s;
-        setVer((v) => v + 1);
-      }
-      raf = requestAnimationFrame(loop);
+    const host = hostRef.current!;
+    const refresh = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const next = ctrl.signature();
+        if (sig !== next) { sig = next; setVer(v => v + 1); }
+      });
     };
-    raf = requestAnimationFrame(loop);
+    const observer = new ResizeObserver(refresh);
+    observer.observe(host);
+    const onDrag = (e: PointerEvent) => { if (e.buttons) refresh(); };
+    host.addEventListener('pointermove', onDrag);
+    host.addEventListener('wheel', refresh, { passive: true });
+    host.addEventListener('dblclick', refresh);
+    ctrl.chart.timeScale().subscribeVisibleLogicalRangeChange(refresh);
+    const unsubscribe = marketBus.on(refresh);
+    refresh();
     return () => {
+      unsubscribe();
+      observer.disconnect();
+      host.removeEventListener('pointermove', onDrag);
+      host.removeEventListener('wheel', refresh);
+      host.removeEventListener('dblclick', refresh);
+      ctrl.chart.timeScale().unsubscribeVisibleLogicalRangeChange(refresh);
       cancelAnimationFrame(raf);
       if (primary && shooter.fn) shooter.fn = null;
       ctrl.destroy();
@@ -268,7 +284,7 @@ export function ChartPanel({ index }: { index: number }) {
       if (p.openedAt >= first) m.push({ time: ctrl.bucket(p.openedAt), position: p.side === 'long' ? 'belowBar' : 'aboveBar', shape: p.side === 'long' ? 'arrowUp' : 'arrowDown', color: p.side === 'long' ? C.up : C.down, size: 1 });
     }
     for (const e of eventsBetween(first, f.clock)) {
-      m.push({ time: ctrl.bucket(e.t), position: 'aboveBar', shape: 'square', color: C.ink3, text: e.label, size: 0.6 });
+      m.push({ time: ctrl.bucket(e.t), position: 'aboveBar', shape: 'square', color: C.gold, text: e.label, size: 0.7 });
     }
     ctrl.setMarkers(m.filter((x) => (x.time as number) * 1000 >= first));
   }, [sessionTrades, session?.positions.length, barsLen, tf, session]);
@@ -278,7 +294,7 @@ export function ChartPanel({ index }: { index: number }) {
     return fxBus.on((e) => {
       const ctrl = ctrlRef.current;
       if (!ctrl) return;
-      if (e.kind === 'bar' && !primary) return;
+      if ((e.kind === 'bar' && (!primary || (useApp.getState().playing && useApp.getState().prefs.speed >= 3))) || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
       requestAnimationFrame(() => {
         const x = ctrl.lastBarX() ?? 0;
         const y = ctrl.priceToY(e.price) ?? 0;

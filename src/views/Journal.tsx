@@ -36,7 +36,7 @@ export function Journal() {
   const sessions = useApp((s) => s.sessions);
   const selId = useApp((s) => s.journalTradeId);
   const S = useApp.getState;
-  const [acct, setAcct] = useState<string>('all');
+  const [acct, setAcct] = useState<string>(() => trades.find(t => t.id === selId)?.accountId ?? 'all');
   const archived = useMemo(() => new Set(accounts.filter((a) => a.archived).map((a) => a.id)), [accounts]);
   const list = useMemo(
     () =>
