@@ -53,7 +53,7 @@ export function App() {
         </button>
       </nav>
       <main className="main">
-        <Suspense fallback={<div className="loading" role="status">Yükleniyor…</div>}>
+        <Suspense fallback={<div className="loading" role="status" aria-label="Yükleniyor"><span className="spin" /></div>}>
           {view === 'dashboard' && <Dashboard />}
           {view === 'new' && <NewAccount />}
           {view === 'trade' && <Trade />}

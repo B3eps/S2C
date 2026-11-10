@@ -264,9 +264,38 @@ export function passBlocker(a: Account, openPositions: number): string | null {
   return null;
 }
 
-function persistSession(session: SessionRec | null, _immediate = true) {
-  if (session) void db.putSession(structuredClone(session)).catch(() =>
+/**
+ * Session writes: user actions save at once; replay steps save at most once a second, and the
+ * latest state is always flushed (on pause, on leaving the page). Closed trades are written
+ * separately and atomically in closePos, so throttling never loses a trade.
+ */
+let pendingSession: SessionRec | null = null;
+let sessionTimer: ReturnType<typeof setTimeout> | undefined;
+function writeSession(session: SessionRec) {
+  void db.putSession(structuredClone(session)).catch(() =>
     useApp.getState().showToast('Seans kaydedilemedi. Tarayıcı depolamasını kontrol et.', 'warn'));
+}
+export function flushSession() {
+  clearTimeout(sessionTimer);
+  sessionTimer = undefined;
+  if (pendingSession) writeSession(pendingSession);
+  pendingSession = null;
+}
+function persistSession(session: SessionRec | null, immediate = true) {
+  if (!session) return;
+  if (immediate) {
+    pendingSession = null;
+    clearTimeout(sessionTimer);
+    sessionTimer = undefined;
+    writeSession(session);
+    return;
+  }
+  pendingSession = session;
+  if (!sessionTimer) sessionTimer = setTimeout(flushSession, 1000);
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', flushSession);
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && flushSession());
 }
 
 const accountNo = (existing: Account[]) => {
@@ -546,7 +575,7 @@ export const useApp = create<State>((set, get) => {
     set({ live: computeLive(), session: { ...s } });
     marketBus.emit('update');
     runShots();
-    persistSession(get().session);
+    persistSession(get().session, false);
   };
 
   return {
@@ -872,7 +901,10 @@ export const useApp = create<State>((set, get) => {
     setPlaying(p) {
       cancelAnimationFrame(playRaf);
       set({ playing: p });
-      if (!p) return;
+      if (!p) {
+        flushSession();
+        return;
+      }
       let last = performance.now();
       let acc = 0;
       const loop = (now: number) => {

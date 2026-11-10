@@ -2371,3 +2371,21 @@ table.tbl {
 .stat-grid.money { grid-template-columns: repeat(3, 1fr); }
 .stat-grid.money .stat:nth-child(3) { border-right: 0; }
 .stat-grid.money .stat { border-bottom: 0; }
+
+/* native date fields follow the palette */
+input[type='date'] {
+  color-scheme: dark;
+  font-variant-numeric: tabular-nums;
+}
+input[type='date']::-webkit-calendar-picker-indicator {
+  filter: invert(0.75) sepia(0.15);
+  opacity: 0.7;
+  cursor: pointer;
+}
+input[type='date']::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+input[type='date']:invalid,
+input[type='date']:placeholder-shown {
+  color: var(--ink-3);
+}

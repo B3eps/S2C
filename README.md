@@ -1,27 +1,78 @@
 # S2C
 
-Masaüstü tarayıcı için yerel XAU/USD replay ve sanal prop hesabı simülatörü.
+Bilgisayarında çalışan, kişisel XAU/USD (altın) pratik ortamı.
 
-## Windows kurulumu
+Gerçek altın grafiği geçmişten rastgele bir anda açılır. Fiyat ve tarih gizlidir, sadece fiyat hareketine bakarak işlem yaparsın. Seans bitince gerçek tarih ve fiyat açıklanır.
 
-GitHub Releases bölümünden `S2C-Setup-...-Windows-x64.zip` dosyasını indirin, ZIP'i çıkarın ve içindeki `S2C-Setup-...exe` dosyasını çalıştırın. Kurulum kullanıcı hesabına yapılır; yönetici izni gerekmez. Uygulama masaüstü ve Başlat menüsüne kısayol ekler. Uygulamayı kaldırmak yerel kayıt klasörünü otomatik silmez.
+Üstünde sanal bir prop firma katmanı var: değerlendirme hesabı alırsın, kuralları aşarsan hesap kapanır, hedefe ulaşırsan fonlanır ve sanal ödeme çekersin. Ne harcadığın ve ne kazandığın istatistikte görünür.
 
-Hesaplar, setuplar, işlemler ve günlük `%APPDATA%\\S2C` altında bu bilgisayarda kalır. Başka tarayıcıdaki kayıtlar otomatik taşınmaz; gerekiyorsa tarayıcı sürümünden Ayarlar → Yedekleme ile dışa aktarın ve masaüstü sürümünde içe aktarın. Günlük/strateji klasörleri Ayarlar'dan ayrılır; yeni setup açılırken eskisi notuyla arşivlenir, istatistikler klasör bazında ayrılır.
+![S2C](public/brand/s2c-emblem.png)
 
-İlk çalıştırmada Windows SmartScreen, kod imzası bulunmadığı için tanınmayan yayıncı uyarısı gösterebilir. Yayınlanan SHA256SUMS dosyası kurulum ZIP'inin ve EXE'nin bütünlüğünü kontrol etmek içindir.
+## Neler var
 
-## Geliştirici kurulumu
+- **Grafik**
+  - Kör replay: gerçek Dukascopy XAU/USD mumları, fiyat ve tarih gizli.
+  - Gizli fiyat tek tıkla açılabilir.
+  - 1–8 grafik bölmesi, 5 zaman dilimi.
+  - Eksenleri sürükleyerek yakınlaştırma.
+- **Emirler**
+  - Piyasa, limit ve stop emirleri.
+  - SL/TP isteğe bağlı. Grafikte sürükleyerek taşınır, tıklayarak düzenlenir.
+  - Riske göre lot hesabı.
+- **Hesaplar:** Sanal prop hesapları, BEM Funding kurallarını örnek alan programlar.
+  - Günlük ve toplam zarar sınırı (sabit ya da takip eden).
+  - Aşamalar, kârlı gün şartı ve tutarlılık sınırı.
+  - Ödeme şartları.
+- **Analiz araçları**
+  - 64 indikatör.
+  - Kategorili çizim araçları: kanallar, Fibonacci, pitchfork, pozisyon planlayıcı, ölçüm.
+  - Takvimde NFP, CPI ve FOMC işaretleri.
+- **Kayıt ve istatistik**
+  - İşlem günlüğü: her işlemin grafiği, giriş ve çıkış görüntüsü, notlar, işlem tekrarı.
+  - İstatistik: kâr/zarar eğrisi, performans takvimi, saat × gün ısı haritası, harcanan ve çekilen para.
+- **Setup klasörleri:** Farklı stratejileri ayrı tutmak için.
+- **Arayüz:** Tamamen Türkçe. Ses ve animasyonlar uygulamaya özel.
 
-Node.js 22+ ve npm ile proje klasöründe `npm ci`, ardından `npm run dev` çalıştırın. Uygulamayı http://localhost:5198 adresinden açın. `npm run desktop` uygulamayı Electron penceresinde açar. Windows kurulum paketini yerelde üretmek için `npm run dist:win` çalıştırın.
+## Kurulum (Windows)
 
-Yeni bir GitHub Release için `v*` biçiminde etiket gönderin. Windows Actions iş akışı testleri çalıştırır; setup EXE'si, EXE'yi içeren ZIP ve SHA256SUMS dosyasıyla release oluşturur.
+1. [Node.js](https://nodejs.org) LTS sürümünü kur (22 veya üstü).
+2. Bu depoyu indir: **Code → Download ZIP**, sonra ZIP'i bir klasöre çıkar. Ya da `git clone` ile klonla.
+3. Klasördeki **`S2C.bat`** dosyasına çift tıkla.
 
-Vite sunucusu Dukascopy bid mumlarını getirir ve diskte önbelleğe alır. Statik dosyalar tek başına mum servisini çalıştırmaz. Tek fiyat serisi, gerçek spread veya kaymayı temsil etmez. Aynı dakika içinde stop ve hedefe dokunulduğunda simülasyon stopa öncelik verir. BEM paketleri sürümlü simülasyon varsayımları içerir. Firmanın duyurduğu bütün haberler, yaptırımlar ve ödeme incelemeleri modellenmez.
+İlk açılışta gerekli paketler kurulur, bu bir kez olur ve birkaç dakika sürebilir. Sonra uygulama `http://localhost:5199` adresinde tarayıcında açılır.
 
-Yeni hesaplarda kurallar oluşturulma anındaki sürüme göre saklanır; eski hesaplar kaynak sayfa değişince geriye dönük değişmez. BEM One'da uygun ödemenin kâr payı, günlük zarar tutarının %50'si veya 150 USD (yüksek olan) eşiğini karşılamalıdır. One Only için asgari ödül 150 USD'dir ve ödeme sonrası günlük zarar tutarının %50'si hesapta kalmalıdır. Uygun ödül eşiği ödeme sağlayıcısı kesintisinden önce hesaplanır; gösterilen sanal ödeme %2 işlem kesintisinden sonradır. One hesabında kayan zarar tabanı üzerinde pozitif bakiye bırakmak için simülatör 0,01 USD tampon kullanır.
+- **Kapatmak için:** Açılan siyah pencereyi kapat ya da **`S2C-Kapat.bat`** dosyasına çift tıkla.
+- **Güncellemek için:** Yeni dosyaları aynı klasöre çıkar ve `S2C.bat` ile aç. Uygulama değişiklikleri görür ve kendini yeniden hazırlar.
 
-Kural kaynakları 10 Kasım 2026'da kontrol edildi: [BEM One şartları](https://bemfunding.com/terms-of-use/bem-one), [BEM One Only şartları](https://bemfunding.com/terms-of-use/bem-one-only), [ödül başvuru aralığı](https://bemfunding.com/faq/rewards-when-and-how-often-can-i-request-my-reward), [ödeme ücreti ve alt sınırı](https://bemfunding.com/en/faq/rewards-are-there-any-fees-or-limits-on-rewards). Firma şartları değişebilir; haber kısıtları, yasaklı stratejiler, risk sınırları ve ödeme inceleme kararları simülatörde bütünüyle uygulanmaz.
+macOS ve Linux'ta aynı klasörde `npm run launch` çalıştır.
 
-Tarayıcı testi: Chrome kurulu bir bilgisayarda `npm run test:browser`. Geçici bir profilde sentetik mumlar ve örnek hesaplarla çalışır.
+## Verilerin
 
-Kontroller: `npm test`, `npm run typecheck`, `npm run build`. Yerel yedekler, veri önbelleği ve kişisel çıktılar Git kapsamı dışındadır.
+Hesaplar, işlemler, günlük ve ayarlar **sadece senin bilgisayarında**, tarayıcının içinde saklanır. Hiçbir sunucuya gönderilmez.
+
+- **Adres:** Veriler `http://localhost:5199` adresine bağlıdır. Başlatıcı bu yüzden hep aynı portu kullanır. Başka bir adresten açarsan uygulama boş görünür.
+- **Tarayıcı:** Başka bir tarayıcıda açarsan veriler oraya taşınmaz.
+- **Silinme:** Tarayıcı verilerini (çerezler ve site verileri) temizlersen kayıtlar silinir.
+- **Yedek:** **Ayarlar → Yedekleme → Yedeği indir** ile düzenli olarak yedek al. Yedekten geri yüklemek ve başka bir bilgisayara taşımak da aynı yerden yapılır.
+
+## Bilmen gerekenler
+
+- **Veri kaynağı:** Mumlar, internet üzerinden Dukascopy'den (XAU/USD alış fiyatı) indirilir ve klasördeki `.cache` içinde saklanır. İnternet bağlantısı gerekir.
+- **Spread ve kayma:** Tek fiyat serisi kullanıldığı için gerçek spread ve kayma yoktur.
+- **Aynı dakikada SL ve TP:** Simülasyon stopu önce sayar.
+- **BEM programları:** Firmanın 10 Kasım 2026'da yayımlanan şartlarına göre modellendi. Haber kısıtları, sembol başına risk sınırı ve ödeme incelemeleri bütünüyle modellenmez.
+  - Kaynaklar: [BEM One](https://bemfunding.com/terms-of-use/bem-one), [BEM One Only](https://bemfunding.com/terms-of-use/bem-one-only), [Classic Normal](https://bemfunding.com/terms-of-use/bem-classic-normal), [Classic Swing](https://bemfunding.com/terms-of-use/bem-classic-swing).
+  - Firma şartları değişebilir. Yeni hesaplar, açıldıkları andaki kuralları saklar.
+  - Bu proje BEM Funding ile bağlantılı değildir. Gerçek para ya da gerçek hesap yoktur, yatırım tavsiyesi değildir.
+
+## Geliştirme
+
+```bash
+npm ci
+npm run dev        # http://localhost:5198 (geliştirme, ayrı veri)
+npm test           # çekirdek testler
+npm run typecheck
+npm run build
+```
+
+`npm run test:browser`, Chrome kurulu bir bilgisayarda geçici bir profil, sentetik mumlar ve örnek hesaplarla uçtan uca test yapar.
