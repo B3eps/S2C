@@ -37,7 +37,7 @@ export function Gauge({ name, value, ratio, kind, sub }: { name: string; value: 
     <div className={`gauge ${kind} ${cls}`} title={sub}>
       <div className="gauge-top">
         <span className="name">{name}</span>
-        <span className="val">{value}</span>
+        <span className="val" title={value}>{value}</span>
       </div>
       <div className="gauge-track">
         <div className="gauge-fill" style={{ width: `${r * 100}%` }} />

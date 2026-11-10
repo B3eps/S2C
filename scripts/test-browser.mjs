@@ -28,12 +28,13 @@ try {
     const db = await import('/src/lib/db.ts');
     const { fetchRange } = await import('/src/lib/feed.ts');
     const { DEFAULT_RULES } = await import('/src/lib/types.ts');
-    const a = { id:'a', no:'S2C-1', status:'active', phase:'challenge', size:5000, balance:4990, createdAt:start, rules:DEFAULT_RULES, tradingDays:[], payouts:[] };
-    const session = { id:'s', accountId:'a', startMs:start, clockMs:start, startedAt:start, dayKey:'2025-01-07', dayStartEquity:5000,
+    const setupId = window.__s2c.getState().activeSetupId;
+    const a = { id:'a', setupId, no:'S2C-1', status:'active', phase:'challenge', size:5000, balance:5400, createdAt:start, rules:{ ...DEFAULT_RULES, minDays:3, minDayPct:0.31 }, tradingDays:[], payouts:[] };
+    const session = { id:'s', setupId, accountId:'a', startMs:start, clockMs:start, startedAt:start, dayKey:'2025-01-07', dayStartEquity:5400,
       firstPrice:100, orders:[{ id:'o',side:'long',type:'limit',lots:0.01,price:90,createdAt:start }],
       positions:[{id:'p',side:'long',lots:0.01,entry:100,openedAt:start,orderType:'market',shotOpen:'img'}],
       drawings:[{id:'d',kind:'trend',a:{t:start-60000,p:99},b:{t:start,p:100}}] };
-    const trade = { id:'t',accountId:'a',sessionId:'s',tf:'1h',side:'long',orderType:'market',reason:'manual',entry:110,exit:100,lots:0.01,pnl:-10,openedAt:start-60000,closedAt:start,realClosedAt:Date.now(),note:'' };
+    const trade = { id:'t',setupId,accountId:'a',sessionId:'s',tf:'1h',side:'long',orderType:'market',reason:'manual',entry:110,exit:100,lots:0.01,pnl:-10,openedAt:start-60000,closedAt:start,realClosedAt:Date.now(),note:'' };
     await db.store.putAccount(a);
     await db.store.putSession(session);
     await db.store.putTrade(trade);
@@ -52,7 +53,7 @@ try {
     const partial = await fetchRange('1h', start - 7200000, start);
     return [partial.at(-1).h, partial.at(-1).v, rejected, (await db.store.accounts())[0].balance];
   }, start);
-  assert.deepEqual(probe, [101,12,true,4990]);
+  assert.deepEqual(probe, [101,12,true,5400]);
   await page.reload();
   await page.waitForFunction(() => window.__s2c?.getState().session?.id === 's');
   const restored = await page.evaluate(() => {
@@ -60,6 +61,21 @@ try {
     return [s.clockMs,s.orders[0].id,s.positions[0].shotOpen,s.drawings[0].id];
   });
   assert.deepEqual(restored,[start,'o','img','d']);
+  await page.getByRole('button',{name:'Gün sonuna ilerle'}).click();
+  await page.waitForFunction(() => window.__s2c.getState().session?.dayKey === '2025-01-08', null, { timeout: 30000 });
+  const dayEnd = await page.evaluate(() => {
+    const s = window.__s2c.getState().session;
+    return [s.dayKey, s.positions.length, s.clockMs >= Date.UTC(2025,0,7,22)];
+  });
+  assert.deepEqual(dayEnd,['2025-01-08',1,true]);
+  const compactGauge = await page.evaluate(() => {
+    const value = document.querySelector('.gauge.goal .val');
+    const style = getComputedStyle(value);
+    return { text:value.textContent, title:value.title, overflow:style.overflow, ellipsis:style.textOverflow };
+  });
+  assert.match(compactGauge.text,/Hedef tamam/);
+  assert.equal(compactGauge.title,compactGauge.text);
+  assert.deepEqual([compactGauge.overflow,compactGauge.ellipsis],['hidden','ellipsis']);
   for (const width of [1280,1920]) {
     await page.setViewportSize({ width, height:900 });
     for (const count of [1,4,8]) {
@@ -85,8 +101,23 @@ try {
   await page.getByRole('button',{name:/Günlükte aç/}).first().click();
   await page.getByRole('button',{name:'Tekrar izle'}).waitFor();
   assert.equal(await page.locator('textarea').inputValue(), 'Arşiv testi');
+  await page.getByRole('button',{name:'Ayarlar',exact:true}).click();
+  const oldSetupId = await page.evaluate(() => window.__s2c.getState().activeSetupId);
+  await page.getByLabel('Yeni setup adı').fill('Londra açılışı');
+  await page.getByLabel('Neden yeni setup açıyorsun?').fill('Günlük kayıplardan sonra farklı planı ayır.');
+  await page.getByRole('button',{name:/Mevcut setup'ı arşivle/}).click();
+  await page.waitForFunction(() => window.__s2c?.getState().ready && window.__s2c.getState().accounts.length === 0);
+  const newSetup = await page.evaluate(() => {
+    const s = window.__s2c.getState();
+    return [s.setups.find(x => x.id === s.activeSetupId)?.name, s.setups.find(x => x.id === s.activeSetupId)?.note, s.trades.length];
+  });
+  assert.deepEqual(newSetup,['Londra açılışı','Günlük kayıplardan sonra farklı planı ayır.',0]);
+  await page.getByRole('button',{name:'Ayarlar',exact:true}).click();
+  await page.getByRole('combobox',{name:'Setup klasörleri'}).selectOption(oldSetupId);
+  await page.waitForFunction(() => window.__s2c?.getState().ready && window.__s2c.getState().accounts.length === 2);
+  assert.equal(await page.evaluate(() => window.__s2c.getState().trades.length),3);
   assert.deepEqual(errors,[]);
-  console.log('Replay cutoff, restore, reload, populated charts and calendar navigation passed.');
+  console.log('Replay cutoff, restore, day-end replay, setup isolation, charts and calendar navigation passed.');
 } finally {
   await browser?.close();
   await server.close();

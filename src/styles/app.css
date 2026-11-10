@@ -725,6 +725,10 @@ table.tbl {
   color: var(--ink-3);
 }
 .gauge-top .val {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
   color: var(--ink-1);
   font-weight: 550;
 }

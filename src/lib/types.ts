@@ -53,6 +53,7 @@ export type CloseReason = 'tp' | 'sl' | 'manual' | 'session' | 'violation';
 
 export interface Trade {
   levels?: LevelChange[];
+  setupId?: string;
   id: string;
   accountId: string;
   sessionId: string;
@@ -123,6 +124,7 @@ export type AccountStatus = 'active' | 'violated';
 
 export interface Account {
   id: string;
+  setupId?: string;
   no: string;
   size: number;
   phase: Phase;
@@ -169,6 +171,7 @@ export interface Drawing {
 export interface SessionRec {
   dataSource?: 'dukascopy-xauusd-bid';
   id: string;
+  setupId?: string;
   accountId: string;
   startMs: number;
   clockMs: number;
@@ -183,6 +186,14 @@ export interface SessionRec {
   lastPrice?: number;
   high?: number;
   low?: number;
+}
+
+export interface SetupRecord {
+  id: string;
+  name: string;
+  note: string;
+  createdAt: number;
+  archivedAt?: number;
 }
 
 export const DEFAULT_RULES: Rules = {

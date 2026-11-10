@@ -9,7 +9,7 @@ import { pendingFill, positionExit, riskLots, worstEquity } from './lib/executio
 import type { ActiveInd } from './lib/indicators';
 import {
   Account, CONTRACT, CloseReason, DEFAULT_RULES, Drawing, DrawingKind, MIN_LOT, Order, OrderType, Position, Rules,
-  SessionRec, Side, TF, TF_MS, Trade, uid,
+  SessionRec, SetupRecord, Side, TF, TF_MS, Trade, uid,
 } from './lib/types';
 
 // ── module-level, non-serialisable runtime ────────────────────────────────────
@@ -120,6 +120,8 @@ interface State {
   accounts: Account[];
   trades: Trade[];
   sessions: SessionRec[];
+  setups: SetupRecord[];
+  activeSetupId: string;
   settings: Settings;
   prefs: ChartPrefs;
   session: SessionRec | null;
@@ -138,11 +140,14 @@ interface State {
   toast: { id: number; text: string; tone: 'neutral' | 'warn' | 'down' } | null;
 
   boot(): Promise<void>;
+  createSetup(name: string, note: string): Promise<void>;
+  switchSetup(id: string): Promise<void>;
   go(v: View): void;
   createAccount(size: number, programId?: string): Promise<void>;
   archiveAccount(id: string, archived: boolean): Promise<void>;
   startSession(accountId: string): Promise<void>;
   endSession(reason?: Notice['reason']): Promise<void>;
+  advanceToDayEnd(): Promise<void>;
   stepBar(): void;
   stepMinutes(n: number): void;
   setPlaying(p: boolean): void;
@@ -371,6 +376,7 @@ export const useApp = create<State>((set, get) => {
     a.dayPnl = { ...(a.dayPnl ?? {}), [dk]: (a.dayPnl?.[dk] ?? 0) + pnl };
     const trade: Trade = {
       id: p.id,
+      setupId: get().activeSetupId,
       accountId: a.id,
       sessionId: s.id,
       side: p.side,
@@ -549,6 +555,8 @@ export const useApp = create<State>((set, get) => {
     accounts: [],
     trades: [],
     sessions: [],
+    setups: [],
+    activeSetupId: '',
     settings: { rules: DEFAULT_RULES, sound: true, volume: 0.6, barTick: false },
     prefs: DEFAULT_PREFS,
     session: null,
@@ -568,13 +576,31 @@ export const useApp = create<State>((set, get) => {
     toast: null,
 
     async boot() {
-      const [accounts, trades, sessions, settings, prefs] = await Promise.all([
+      const [allAccounts, allTrades, allSessions, storedSetups, activeSetup, settings, prefs] = await Promise.all([
         db.accounts(),
         db.trades(),
         db.sessions(),
+        db.setups(),
+        db.kv<string>('activeSetupId'),
         db.kv<Settings>('settings'),
         db.kv<ChartPrefs>('prefs'),
       ]);
+      let setups = storedSetups;
+      if (!setups.length) {
+        const legacy: SetupRecord = { id: 'setup-default', name: 'İlk kurulum', note: 'Uygulamanın ilk çalışma alanı.', createdAt: Date.now() };
+        setups = [legacy];
+        await db.putSetup(legacy);
+      }
+      const legacySetupId = setups[0].id;
+      const accountMap = new Map(allAccounts.map((a) => [a.id, a]));
+      for (const a of allAccounts) if (!a.setupId || !setups.some((x) => x.id === a.setupId)) { a.setupId = legacySetupId; await db.putAccount(a); }
+      for (const s of allSessions) if (!s.setupId || !setups.some((x) => x.id === s.setupId)) { s.setupId = accountMap.get(s.accountId)?.setupId ?? legacySetupId; await db.putSession(s); }
+      for (const t of allTrades) if (!t.setupId || !setups.some((x) => x.id === t.setupId)) { t.setupId = accountMap.get(t.accountId)?.setupId ?? legacySetupId; await db.putTrade(t); }
+      const selectedSetupId = setups.some((x) => x.id === activeSetup) ? activeSetup! : legacySetupId;
+      if (selectedSetupId !== activeSetup) await db.putKv('activeSetupId', selectedSetupId);
+      const accounts = allAccounts.filter((a) => a.setupId === selectedSetupId);
+      const trades = allTrades.filter((t) => t.setupId === selectedSetupId);
+      const sessions = allSessions.filter((s) => s.setupId === selectedSetupId);
       if (accounts.some((a) => /^S2C-\d{6}$/.test(a.no))) {
         [...accounts]
           .sort((x, y) => x.createdAt - y.createdAt)
@@ -587,6 +613,8 @@ export const useApp = create<State>((set, get) => {
       configureSound({ enabled: st.sound, volume: st.volume, barTick: st.barTick });
       set({
         ready: true,
+        setups,
+        activeSetupId: selectedSetupId,
         accounts: accounts.sort((a, b) => b.createdAt - a.createdAt),
         trades,
         sessions,
@@ -613,10 +641,32 @@ export const useApp = create<State>((set, get) => {
       }
     },
 
+    async createSetup(name, note) {
+      const cleanName = name.trim();
+      if (!cleanName) { get().showToast('Setup klasörüne bir isim ver.', 'warn'); return; }
+      if (get().session) await get().endSession('user');
+      const now = Date.now();
+      const setups = get().setups.map((x) => x.id === get().activeSetupId ? { ...x, archivedAt: now } : x);
+      const fresh: SetupRecord = { id: uid(), name: cleanName, note: note.trim(), createdAt: now };
+      await db.putSetup(setups.find((x) => x.id === get().activeSetupId)!);
+      await db.putSetup(fresh);
+      await db.putKv('activeSetupId', fresh.id);
+      set({ setups: [...setups, fresh], activeSetupId: fresh.id });
+      location.reload();
+    },
+
+    async switchSetup(id) {
+      if (id === get().activeSetupId || !get().setups.some((x) => x.id === id)) return;
+      if (get().session) await get().endSession('user');
+      await db.putKv('activeSetupId', id);
+      location.reload();
+    },
+
     async createAccount(size, programId) {
       const prog = PROGRAMS.find((p) => p.id === programId);
       const a: Account = {
         id: uid(),
+        setupId: get().activeSetupId,
         no: accountNo(get().accounts),
         size,
         phase: 'challenge',
@@ -648,6 +698,7 @@ export const useApp = create<State>((set, get) => {
         const start = randomStart();
         s = {
           id: uid(),
+          setupId: get().activeSetupId,
           accountId,
           dataSource: 'dukascopy-xauusd-bid',
           startMs: start,
@@ -726,6 +777,47 @@ export const useApp = create<State>((set, get) => {
       });
       if (get().view === 'trade') get().go('dashboard');
       if (!overlay) play('print');
+    },
+
+    async advanceToDayEnd() {
+      const initial = get().session;
+      if (!initial || !feed || get().playing || get().dataWait) return;
+      const dayKey = initial.dayKey;
+      let revealed = 0;
+      set({ dataWait: true });
+      for (let i = 0; i < 7 * 24 * 60; i++) {
+        const current = get().session;
+        if (!current || current.id !== initial.id || current.dayKey !== dayKey || !feed) break;
+        const bar = feed.step();
+        if (!bar) {
+          if (feed.loadError) {
+            get().showToast('Gün sonuna ilerlenemedi; piyasa verisi yüklenemedi.', 'warn');
+            break;
+          }
+          if (feed.isLoading) {
+            await feed.waitForLoading();
+            continue;
+          }
+          if (feed.exhausted) {
+            get().showToast('Gün sonuna yetecek tarihsel mum kalmadı.', 'warn');
+            break;
+          }
+          continue;
+        }
+        revealed++;
+        if (!processMinute()) break;
+        if (revealed >= 64) {
+          afterSteps(revealed);
+          revealed = 0;
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
+      if (revealed && get().session?.id === initial.id) afterSteps(revealed);
+      set({ dataWait: false });
+      if (get().session?.id === initial.id && get().session!.dayKey !== dayKey)
+        get().showToast('Prop günü tamamlandı; günlük limit yeni güne göre yenilendi.');
+      else if (get().session?.id === initial.id && get().session!.dayKey === dayKey && feed?.exhausted)
+        get().showToast('Gün sonuna ulaşmak için daha fazla piyasa verisi gerekiyor.', 'warn');
     },
 
     stepMinutes(n) {

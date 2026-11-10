@@ -17,7 +17,14 @@ const FIELDS: [keyof Rules, string, number, number, number][] = [
 export function Settings() {
   const settings = useApp((s) => s.settings);
   const save = useApp((s) => s.saveSettings);
+  const setups = useApp((s) => s.setups);
+  const activeSetupId = useApp((s) => s.activeSetupId);
+  const createSetup = useApp((s) => s.createSetup);
+  const switchSetup = useApp((s) => s.switchSetup);
+  const activeSetup = setups.find((x) => x.id === activeSetupId);
   const [rules, setRules] = useState<Rules>(settings.rules);
+  const [setupName, setSetupName] = useState('');
+  const [setupNote, setSetupNote] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
   const [confirmImport, setConfirmImport] = useState<{ file: File; accounts: number; trades: number; sessions: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -47,6 +54,30 @@ export function Settings() {
         <h1>Ayarlar</h1>
       </div>
       <div className="settings-grid">
+        <section className="panel">
+          <div className="panel-head"><h2>Çalışma setup'ı</h2></div>
+          <div className="panel-body" style={{ display: 'grid', gap: 14 }}>
+            <p className="muted">Her setup hesaplarını, günlüğünü ve istatistiklerini ayrı tutar. Yeni setup açınca mevcut setup arşivlenir; verileri silinmez.</p>
+            <label className="field">
+              <span>Setup klasörleri</span>
+              <select className="input" value={activeSetupId} onChange={(e) => void switchSetup(e.target.value)}>
+                {setups.map((x) => <option key={x.id} value={x.id}>{x.name}{x.archivedAt ? ' · Arşiv' : ''}</option>)}
+              </select>
+            </label>
+            {activeSetup?.note && <p className="muted">Not: {activeSetup.note}</p>}
+            <div className="form-grid">
+              <label className="field">
+                <span>Yeni setup adı</span>
+                <input className="input" maxLength={60} value={setupName} onChange={(e) => setSetupName(e.target.value)} placeholder="Ör. Londra açılışı" />
+              </label>
+              <label className="field">
+                <span>Neden yeni setup açıyorsun?</span>
+                <input className="input" maxLength={240} value={setupNote} onChange={(e) => setSetupNote(e.target.value)} placeholder="Kısa not veya değerlendirme" />
+              </label>
+            </div>
+            <div><button className="btn primary" disabled={!setupName.trim()} onClick={() => void createSetup(setupName, setupNote)}>Mevcut setup'ı arşivle ve yenisini başlat</button></div>
+          </div>
+        </section>
         <section className="panel">
           <div className="panel-head"><h2>Veri kaynağı</h2></div>
           <div className="panel-body" style={{ display: 'grid', gap: 10 }}>

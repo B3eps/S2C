@@ -1,0 +1,41 @@
+name: S2C Windows release
+on:
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: write
+jobs:
+  package-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run dist:win
+      - name: Package ZIP and checksums
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem release -Filter 'S2C-Setup-*.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'Setup EXE was not produced.' }
+          $zipPath = Join-Path $PWD "release/S2C-Setup-$env:GITHUB_REF_NAME-Windows-x64.zip"
+          Compress-Archive -LiteralPath $installer.FullName -DestinationPath $zipPath -CompressionLevel Optimal
+          $files = @($installer.FullName, $zipPath)
+          $hashes = $files | ForEach-Object {
+            $hash = Get-FileHash -LiteralPath $_ -Algorithm SHA256
+            "$($hash.Hash)  $([IO.Path]::GetFileName($_))"
+          }
+          $hashes | Set-Content -LiteralPath 'release/SHA256SUMS.txt' -Encoding ascii
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem release -Filter 'S2C-Setup-*.exe' | Select-Object -First 1
+          $zip = Get-ChildItem release -Filter 'S2C-Setup-*-Windows-x64.zip' | Select-Object -First 1
+          gh release create $env:GITHUB_REF_NAME $installer.FullName $zip.FullName 'release/SHA256SUMS.txt' --title "S2C $env:GITHUB_REF_NAME" --generate-notes

@@ -126,12 +126,12 @@ function TopBar() {
           <button className="btn sm ghost" onClick={() => setConfirm(false)}>
             Vazgeç
           </button>
-          <button className="btn sm primary" onClick={() => endSession('user')}>
-            {session.positions.length ? 'Kapat ve bitir' : 'Bitir'}
+          <button className="btn sm primary" title="Seansı mevcut fiyatla kapatır; günlük limit saatini ileri sarmaz." onClick={() => endSession('user')}>
+            {session.positions.length ? 'Pozisyonları kapat ve seansı kapat' : 'Seansı kapat'}
           </button>
         </div>
       ) : (
-        <button className="btn" onClick={() => setConfirm(true)}>
+        <button className="btn" title="Seansı mevcut fiyatla kapatır; gün sonuna ilerlemek için alttaki düğmeyi kullan." onClick={() => setConfirm(true)}>
           <Icon name="flag" size={16} /> Seansı bitir
         </button>
       )}
@@ -509,6 +509,9 @@ function Dock() {
         </button>
         <button className="btn sm" onClick={() => S().stepBar()} disabled={playing} title="Sonraki mum (Boşluk)">
           <Icon name="step" size={14} /> Sonraki mum <span className="kbd">Boşluk</span>
+        </button>
+        <button className="btn sm" onClick={() => void S().advanceToDayEnd()} disabled={playing || dataWait} title="22:00 UTC'ye kadar tüm mumları, emirleri ve risk kurallarını sırayla işler. Açık pozisyonlar korunur.">
+          Gün sonuna ilerle
         </button>
         <div className="seg" role="group" aria-label="Hız" style={{ marginLeft: 8 }}>
           {SPEEDS.map((sp, i) => (

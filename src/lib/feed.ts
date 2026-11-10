@@ -147,6 +147,10 @@ export class Feed {
     return !!this.loading;
   }
 
+  async waitForLoading() {
+    await this.loading;
+  }
+
   private push(m: Bar) {
     for (const tf of TFS) {
       const ms = TF_MS[tf];

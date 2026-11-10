@@ -6,5 +6,6 @@
 s2c-yedek-*.json
 node_modules
 dist
+release/
 .impeccable/review
 .cache

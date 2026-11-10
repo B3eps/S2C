@@ -2,7 +2,19 @@
 
 Masaüstü tarayıcı için yerel XAU/USD replay ve sanal prop hesabı simülatörü.
 
-Node.js 22 ve npm ile proje klasöründe `npm ci`, ardından `npm run dev` çalıştırın. Uygulamayı http://localhost:5198 adresinden açın. Hesaplar, emirler ve günlük o tarayıcı ve adrese ait IndexedDB içinde saklanır. Tarayıcı verisini silmeden önce Ayarlar üzerinden yedek alın.
+## Windows kurulumu
+
+GitHub Releases bölümünden `S2C-Setup-...-Windows-x64.zip` dosyasını indirin, ZIP'i çıkarın ve içindeki `S2C-Setup-...exe` dosyasını çalıştırın. Kurulum kullanıcı hesabına yapılır; yönetici izni gerekmez. Uygulama masaüstü ve Başlat menüsüne kısayol ekler. Uygulamayı kaldırmak yerel kayıt klasörünü otomatik silmez.
+
+Hesaplar, setuplar, işlemler ve günlük `%APPDATA%\\S2C` altında bu bilgisayarda kalır. Başka tarayıcıdaki kayıtlar otomatik taşınmaz; gerekiyorsa tarayıcı sürümünden Ayarlar → Yedekleme ile dışa aktarın ve masaüstü sürümünde içe aktarın. Günlük/strateji klasörleri Ayarlar'dan ayrılır; yeni setup açılırken eskisi notuyla arşivlenir, istatistikler klasör bazında ayrılır.
+
+İlk çalıştırmada Windows SmartScreen, kod imzası bulunmadığı için tanınmayan yayıncı uyarısı gösterebilir. Yayınlanan SHA256SUMS dosyası kurulum ZIP'inin ve EXE'nin bütünlüğünü kontrol etmek içindir.
+
+## Geliştirici kurulumu
+
+Node.js 22+ ve npm ile proje klasöründe `npm ci`, ardından `npm run dev` çalıştırın. Uygulamayı http://localhost:5198 adresinden açın. `npm run desktop` uygulamayı Electron penceresinde açar. Windows kurulum paketini yerelde üretmek için `npm run dist:win` çalıştırın.
+
+Yeni bir GitHub Release için `v*` biçiminde etiket gönderin. Windows Actions iş akışı testleri çalıştırır; setup EXE'si, EXE'yi içeren ZIP ve SHA256SUMS dosyasıyla release oluşturur.
 
 Vite sunucusu Dukascopy bid mumlarını getirir ve diskte önbelleğe alır. Statik dosyalar tek başına mum servisini çalıştırmaz. Tek fiyat serisi, gerçek spread veya kaymayı temsil etmez. Aynı dakika içinde stop ve hedefe dokunulduğunda simülasyon stopa öncelik verir. BEM paketleri sürümlü simülasyon varsayımları içerir. Firmanın duyurduğu bütün haberler, yaptırımlar ve ödeme incelemeleri modellenmez.
 

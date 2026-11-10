@@ -67,3 +67,10 @@ test('eksik kurallı hesap yedeği reddedilir', async () => {
   const bad = { app:'s2c', version:1, accounts:[a], sessions:[], trades:[], shots:[], kv:[] };
   await assert.rejects(backup.inspectBackup({ text:async()=>JSON.stringify(bad) }), /kuralları/);
 });
+test('eski yedek tek bir varsayılan setup klasörüne taşınır', async () => {
+  const account = { id:'a', no:'S2C-1', createdAt:1, phase:'challenge', status:'active', size:5000, balance:5000, rules:{ target:8, dailyLoss:5, maxLoss:10, split:80, minDays:0, payoutMin:0 }, tradingDays:[], payouts:[] };
+  const old = { app:'s2c', version:1, exportedAt:10, accounts:[account], sessions:[], trades:[], shots:[], kv:[] };
+  const restored = await backup.inspectBackup({ text:async()=>JSON.stringify(old) });
+  assert.equal(restored.accounts[0].setupId, restored.setups[0].id);
+  assert.equal(restored.setups.length, 1);
+});
