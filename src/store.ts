@@ -5,7 +5,7 @@ import { play, configureSound } from './lib/sound';
 import { atr } from './lib/indicators';
 import { money0 } from './lib/format';
 import { PROGRAMS, payoutNet, propDay, salePrice, stepTargets } from './lib/programs';
-import { pendingFill, positionExit, riskLots, worstEquity } from './lib/execution';
+import { DEFAULT_SPREAD, entryPrice, markPrice, pendingFill, positionExit, riskLots, worstEquity } from './lib/execution';
 import type { ActiveInd } from './lib/indicators';
 import {
   Account, CONTRACT, CloseReason, DEFAULT_RULES, Drawing, DrawingKind, MIN_LOT, Order, OrderType, Position, Rules,
@@ -68,6 +68,8 @@ export interface Settings {
   sound: boolean;
   volume: number;
   barTick: boolean;
+  /** ask − bid in dollars; undefined uses DEFAULT_SPREAD */
+  spread?: number;
 }
 
 export type Overlay =
@@ -87,10 +89,19 @@ export interface Notice {
 }
 
 export interface ChartPrefs {
+  parcaSetupInitialized?: boolean;
   /** how many chart panes are shown (1, 2, 3, 4, 6, 8) */
   count: number;
   panes: PaneCfg[];
   speed: number;
+  /** drawings snap to candle time and OHLC (hold Alt to place freely) */
+  magnet?: boolean;
+  /** bottom dock: height in px, and whether it is folded to its replay bar */
+  dockH?: number;
+  dockOpen?: boolean;
+  /** right order panel */
+  orderOpen?: boolean;
+  orderW?: number;
 }
 
 export const SPEEDS = [1, 2, 4, 8, 16, 32];
@@ -101,7 +112,8 @@ export interface PaneCfg {
   ind: ActiveInd[];
 }
 const PANE_TFS: TF[] = ['5m', '1h', '15m', '4h', '1m', '5m', '15m', '1h'];
-const defaultPanes = (): PaneCfg[] => PANE_TFS.map((tf) => ({ tf, ind: [] }));
+const parcaIndicator = (): ActiveInd => ({ uid: uid(), id: 'parca-setup', params: { pivot: 2, window: 8, zoneAge: 80 }, colors: ['#c9a96e'] });
+const defaultPanes = (): PaneCfg[] => PANE_TFS.map((tf, i) => ({ tf, ind: i === 0 ? [parcaIndicator()] : [] }));
 /** The first pane drives replay steps and trade records. */
 export const mainTf = (p: ChartPrefs) => p.panes[0].tf;
 
@@ -155,6 +167,9 @@ interface State {
   setPane(i: number, p: Partial<PaneCfg>): void;
   showPrice: boolean;
   setShowPrice(v: boolean): void;
+  /** index of the chart pane shown alone (multi-pane layouts), null = all */
+  maxPane: number | null;
+  setMaxPane(i: number | null): void;
   setTool(t: Tool): void;
   openTicket(side: Side, type?: OrderType, entry?: number): void;
   updateTicket(p: Partial<Ticket>): void;
@@ -185,6 +200,9 @@ interface State {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 const dir = (s: Side) => (s === 'long' ? 1 : -1);
+/** Ask − bid in dollars applied to the bid candles. */
+export { markPrice };
+export const spreadOf = (s: Settings) => s.spread ?? DEFAULT_SPREAD;
 export const pnlOf = (side: Side, entry: number, exit: number, lots: number) => (exit - entry) * dir(side) * lots * CONTRACT;
 export const riskOf = (entry: number, sl: number | undefined, lots: number) =>
   sl === undefined ? undefined : Math.abs(entry - sl) * lots * CONTRACT;
@@ -304,18 +322,26 @@ const accountNo = (existing: Account[]) => {
 };
 
 const DEFAULT_PREFS: ChartPrefs = {
+  parcaSetupInitialized: true,
   count: 1,
   panes: defaultPanes(),
   speed: 1,
+  magnet: true,
+  dockH: 232,
+  dockOpen: true,
+  orderOpen: true,
 };
 
 function migratePrefs(raw: unknown): ChartPrefs {
   const p = (raw ?? {}) as Partial<ChartPrefs> & { layout?: string; tfA?: TF; tfB?: TF; indA?: ActiveInd[]; indB?: ActiveInd[] };
-  if (p.panes && p.panes.length === 8) return { ...DEFAULT_PREFS, ...p, panes: p.panes };
+  if (p.panes && p.panes.length === 8) {
+    const panes = p.panes.map((pane, i) => i === 0 && !p.parcaSetupInitialized ? { ...pane, ind: [...pane.ind, parcaIndicator()] } : pane);
+    return { ...DEFAULT_PREFS, ...p, panes, parcaSetupInitialized: true };
+  }
   const panes = defaultPanes();
-  if (p.tfA) panes[0] = { tf: p.tfA, ind: p.indA ?? [] };
+  if (p.tfA) panes[0] = { tf: p.tfA, ind: [...(p.indA ?? []), parcaIndicator()] };
   if (p.tfB) panes[1] = { tf: p.tfB, ind: p.indB ?? [] };
-  return { count: p.layout === 'dual' ? 2 : 1, panes, speed: p.speed ?? DEFAULT_PREFS.speed };
+  return { ...DEFAULT_PREFS, count: p.layout === 'dual' ? 2 : 1, panes, speed: p.speed ?? DEFAULT_PREFS.speed };
 }
 
 let warned = { day: false, max: false };
@@ -382,7 +408,8 @@ export const useApp = create<State>((set, get) => {
     const a = account();
     if (!feed || !s || !a) return get().live;
     const price = feed.price;
-    const floating = s.positions.reduce((acc, p) => acc + pnlOf(p.side, p.entry, price, p.lots), 0);
+    const sp = spreadOf(get().settings);
+    const floating = s.positions.reduce((acc, p) => acc + pnlOf(p.side, p.entry, markPrice(p.side, price, sp), p.lots), 0);
     const entryFees = s.positions.reduce((fee, p) => fee + p.entry * p.lots * CONTRACT * (a.rules.commissionPct ?? 0) / 100, 0);
     const equity = a.balance + floating - entryFees;
     return {
@@ -470,11 +497,12 @@ export const useApp = create<State>((set, get) => {
     if (!s || !a) return false;
     const m = feed.current;
     const at = feed.clock;
+    const sp = spreadOf(get().settings);
 
     // day roll
     const dk = propDay(m.t);
     if (dk !== s.dayKey) {
-      const floating = s.positions.reduce((acc, p) => acc + pnlOf(p.side, p.entry, m.o, p.lots), 0);
+      const floating = s.positions.reduce((acc, p) => acc + pnlOf(p.side, p.entry, markPrice(p.side, m.o, sp), p.lots), 0);
       s.dayKey = dk;
       s.dayStartEquity = a.rules.dailyBase === 'balance' ? a.balance : Math.max(a.balance, a.balance + floating);
       warned = { day: false, max: false };
@@ -486,12 +514,12 @@ export const useApp = create<State>((set, get) => {
     // pending orders
     const filled = new Map<string, boolean>();
     for (const o of [...s.orders]) {
-      const fill = pendingFill(o, m);
+      const fill = pendingFill(o, m, sp);
       if (fill !== undefined) {
         s.orders = s.orders.filter((x) => x.id !== o.id);
         const p = openPos(o.side, o.lots, fill, o.sl, o.tp, o.type, at);
         p.openedAt = m.t;
-        filled.set(p.id, fill === m.o);
+        filled.set(p.id, fill === entryPrice(o.side, m.o, sp));
         if (get().editing?.id === o.id) set({ editing: { kind: 'pos', id: p.id } });
       }
     }
@@ -499,13 +527,13 @@ export const useApp = create<State>((set, get) => {
     // exits: stop first when both are touched inside one minute (conservative)
     for (const p of [...s.positions]) {
       if (p.openedAt === m.t && !filled.has(p.id)) continue;
-      const exit = positionExit(p, m, filled.has(p.id), filled.get(p.id) ?? false);
+      const exit = positionExit(p, m, filled.has(p.id), filled.get(p.id) ?? false, sp);
       if (exit) closePos(p, exit.price, exit.reason, at);
     }
 
     // rules on worst intrabar equity
     const entryFees = s.positions.reduce((fee, p) => fee + p.entry * p.lots * CONTRACT * (a.rules.commissionPct ?? 0) / 100, 0);
-    const worst = worstEquity(a.balance - entryFees, s.positions, m);
+    const worst = worstEquity(a.balance - entryFees, s.positions, m, sp);
     const lim = accountLimits(a, s);
     const live = get().live;
     set({ live: { ...live, worstEquity: Math.min(live.worstEquity, worst) } });
@@ -513,7 +541,7 @@ export const useApp = create<State>((set, get) => {
     if (worst < lim.dayFloor) breach = `Günlük zarar limiti ${money0(lim.dayFloor - worst)} aşıldı (%${a.rules.dailyLoss}).`;
     else if (worst < lim.maxFloor) breach = `Toplam zarar limiti ${money0(lim.maxFloor - worst)} aşıldı (%${a.rules.maxLoss}).`;
     if (breach) {
-      for (const p of [...s.positions]) closePos(p, m.c, 'violation', at);
+      for (const p of [...s.positions]) closePos(p, markPrice(p.side, m.c, sp), 'violation', at);
       s.orders = [];
       a.status = 'violated';
       a.violatedAt = Date.now();
@@ -599,6 +627,7 @@ export const useApp = create<State>((set, get) => {
     overlay: null,
     notices: [],
     showPrice: false,
+    maxPane: null,
     replayTradeId: null,
     journalTradeId: null,
     sessionTrades: [],
@@ -777,7 +806,7 @@ export const useApp = create<State>((set, get) => {
       get().setPlaying(false);
       if (!s || !a || !feed) return;
       if (reason === 'user' || reason === 'data') {
-        for (const p of [...s.positions]) closePos(p, feed.price, 'session', feed.clock);
+        for (const p of [...s.positions]) closePos(p, markPrice(p.side, feed.price, spreadOf(get().settings)), 'session', feed.clock);
         s.orders = [];
         saveAccount(a);
         if (tryPass()) return;
@@ -941,6 +970,10 @@ export const useApp = create<State>((set, get) => {
       set({ showPrice: v });
     },
 
+    setMaxPane(i) {
+      set({ maxPane: i });
+    },
+
     setTool(tool) {
       set({ tool });
     },
@@ -987,7 +1020,9 @@ export const useApp = create<State>((set, get) => {
       const a = account();
       if (!t || !s || !a || !feed) return;
       const live = feed.price;
-      const lotsN = ticketLots(t, a.balance, t.type === 'market' ? live : t.entry);
+      // a market buy pays the ask
+      const fill = entryPrice(t.side, live, spreadOf(get().settings));
+      const lotsN = ticketLots(t, a.balance, t.type === 'market' ? fill : t.entry);
       if (!Number.isFinite(lotsN) || lotsN < MIN_LOT) {
         get().showToast('Risk bütçesi 0,01 lot için yetersiz.', 'warn');
         return;
@@ -999,7 +1034,7 @@ export const useApp = create<State>((set, get) => {
         const tp = t.tp !== undefined && (long ? t.tp > live : t.tp < live) ? t.tp : undefined;
         if (t.sl !== undefined && sl === undefined) get().showToast('SL fiyatın öbür tarafında kaldığı için konmadı.', 'warn');
         if (t.tp !== undefined && tp === undefined) get().showToast('TP fiyatın öbür tarafında kaldığı için konmadı.', 'warn');
-        openPos(t.side, lotsN, live, sl, tp, 'market', feed.current.t);
+        openPos(t.side, lotsN, fill, sl, tp, 'market', feed.current.t);
         runShots();
       } else {
         const type = deriveType(t.side, t.entry, feed.price);
@@ -1044,7 +1079,7 @@ export const useApp = create<State>((set, get) => {
       const s = get().session;
       const p = s?.positions.find((x) => x.id === id);
       if (!s || !p || !feed) return;
-      closePos(p, feed.price, 'manual', feed.clock);
+      closePos(p, markPrice(p.side, feed.price, spreadOf(get().settings)), 'manual', feed.clock);
       play('cancel');
       saveAccount(account()!);
       set({ session: { ...s }, live: computeLive() });

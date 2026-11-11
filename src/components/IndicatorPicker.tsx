@@ -107,7 +107,7 @@ export function ParamPopover({ ind, x, y, onChange, onClose }: { ind: ActiveInd;
                 step={p.step}
                 min={p.min}
                 max={p.max}
-                value={ind.params[p.key]}
+                value={ind.params[p.key] ?? p.def}
                 onChange={(e) => {
                   const v = parseFloat(e.target.value);
                   if (!Number.isFinite(v)) return;

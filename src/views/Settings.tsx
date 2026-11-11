@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { useApp } from '../store';
+import { DEFAULT_SPREAD } from '../lib/execution';
 import { exportBackup, importBackup, inspectBackup } from '../lib/db';
 import { DEFAULT_RULES, Rules } from '../lib/types';
 import { play } from '../lib/sound';
@@ -82,7 +83,23 @@ export function Settings() {
           <div className="panel-head"><h2>Veri kaynağı</h2></div>
           <div className="panel-body" style={{ display: 'grid', gap: 10 }}>
             <p><strong>Dukascopy · XAU/USD · alış (bid) mumları</strong></p>
-            <p className="muted">Geçmiş veriler bağlantı üzerinden alınır ve bilgisayarda önbelleğe kaydedilir. Emirler tek fiyat serisiyle simüle edilir; gerçek alış-satış farkı ve kayma hesaba katılmaz.</p>
+            <p className="muted">Geçmiş veriler bağlantı üzerinden alınır ve bilgisayarda önbelleğe kaydedilir. Mumlar alış (bid) fiyatıdır; long işlemler satış (ask) fiyatından açılır, short işlemler satış fiyatından kapanır. Kayma hesaba katılmaz.</p>
+            <label className="field" style={{ maxWidth: 260 }}>
+              <span>Spread (ask − bid, $)</span>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                max={5}
+                step={0.05}
+                value={settings.spread ?? DEFAULT_SPREAD}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (Number.isFinite(v)) save({ spread: Math.max(0, Math.min(5, v)) });
+                }}
+              />
+            </label>
+            <p className="muted">Gerçek spread aracıya ve saate göre değişir; haber ve gün dönüşünde açılır. 0 yazarsan spread uygulanmaz.</p>
             <p className="muted">Takvim: NFP ve CPI geçmiş yayın tarihleri BLS arşivinden, FOMC tarihleri Fed takviminden alınır. NFP verileri Ocak 2023–Kasım 2026, CPI Ocak 2023–Ekim 2026, FOMC 2021–2026 ile sınırlıdır.</p>
           </div>
         </section>

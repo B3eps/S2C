@@ -28,6 +28,12 @@ const P: Record<string, JSX.Element> = {
       <path d="M2.75 14.25h3v3h-3zM14.25 2.75h3v3h-3z" />
     </>
   ),
+  arrow: (
+    <>
+      <path d="M3.5 16.5l12-12" />
+      <path d="M8.5 4.5h7v7" />
+    </>
+  ),
   hline: (
     <>
       <path d="M1.75 10h6.5M11.75 10h6.5" />
@@ -141,6 +147,11 @@ const P: Record<string, JSX.Element> = {
     </>
   ),
   measure: <path d="M3.75 16.25L16.25 3.75M3.75 16.25h4.5M3.75 16.25v-4.5M16.25 3.75h-4.5M16.25 3.75v4.5" />,
+  expand: <path d="M3.25 7.25v-4h4M12.75 3.25h4v4M16.75 12.75v4h-4M7.25 16.75h-4v-4" />,
+  shrink: <path d="M7.25 3.25v4h-4M16.75 7.25h-4v-4M12.75 16.75v-4h4M3.25 12.75h4v4" />,
+  magnet: <path d="M4.25 3.75h3.5v7a2.25 2.25 0 004.5 0v-7h3.5v7a5.75 5.75 0 01-11.5 0zM4.25 7h3.5M12.25 7h3.5" />,
+  text: <path d="M4.25 4.75h11.5M10 4.75v11.5M7.5 16.25h5" />,
+  copy: <path d="M7.25 7.25h9v9h-9zM12.75 7.25v-4h-9v9h3.5" />,
   grid: <path d="M2.75 2.75h6.5v6.5h-6.5zM10.75 2.75h6.5v6.5h-6.5zM2.75 10.75h6.5v6.5h-6.5zM10.75 10.75h6.5v6.5h-6.5z" />,
   info: (
     <>

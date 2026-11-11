@@ -8,8 +8,8 @@
   --rule-strong: #48433c;
 
   --ink-1: #ece7dd;
-  --ink-2: #a9a397;
-  --ink-3: #938c80;
+  --ink-2: #b9b3a7;
+  --ink-3: #a29b8e;
 
   /* gold foil: certification and the primary action only */
   --gold: #d9b25c;
@@ -38,9 +38,9 @@
   --narrow: 76%;
   --wide: 118%;
 
-  --t-11: 0.6875rem;
-  --t-12: 0.75rem;
-  --t-13: 0.8125rem;
+  --t-11: 0.75rem;
+  --t-12: 0.8125rem;
+  --t-13: 0.875rem;
   --t-14: 0.875rem;
   --t-16: 1rem;
   --t-18: 1.125rem;

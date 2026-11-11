@@ -1,0 +1,148 @@
+//@version=6
+indicator("Parca Setup | Bias > Engulf > MSP > Session", overlay = true, max_labels_count = 500)
+
+// Video-based, mechanical interpretation. Signals are confirmed at candle close.
+// NOT in sync with S2C: src/lib/parcaSetup.ts now uses multi-timeframe zones (15m/1h/4h),
+// first-touch reactions, a daily-led bias and session sweeps. This script is the older
+// single-timeframe version and will give different signals.
+groupBias = "1 | Daily Bias"
+useHigherFrames = input.bool(true, "1H + 4H + 1D consensus", group = groupBias)
+groupZone = "2 | Engulf + zone"
+maxZoneAge = input.int(80, "Maximum zone age (bars)", minval = 3, group = groupZone)
+groupMSP = "3 | Mini structure point"
+pivotBars = input.int(2, "Swing bars", minval = 1, maxval = 10, group = groupMSP)
+confirmBars = input.int(8, "Bars allowed after engulf", minval = 0, maxval = 50, group = groupMSP)
+groupSession = "4 | Session liquidity"
+requireSweep = input.bool(true, "Require London sweep on NQ / ES", group = groupSession)
+londonHours = input.session("0300-0930", "London session (New York time)", group = groupSession)
+newYorkHours = input.session("0930-1600", "New York session (New York time)", group = groupSession)
+showAllEngulfs = input.bool(false, "Mark every candle engulf", group = groupZone)
+
+fTrend() =>
+    close[1] > close[2] and high[1] > high[2] ? 1 : close[1] < close[2] and low[1] < low[2] ? -1 : 0
+
+trend1h = request.security(syminfo.tickerid, "60", fTrend(), lookahead = barmerge.lookahead_on)
+trend4h = request.security(syminfo.tickerid, "240", fTrend(), lookahead = barmerge.lookahead_on)
+trend1d = request.security(syminfo.tickerid, "D", fTrend(), lookahead = barmerge.lookahead_on)
+votes = trend1h + trend4h + trend1d
+bias = useHigherFrames ? (votes >= 2 ? 1 : votes <= -2 ? -1 : 0) : trend1d
+
+// Latest FVG. Its direction flips when a candle closes through the far edge (iFVG).
+var float fvgTop = na
+var float fvgBottom = na
+var int fvgSide = 0
+var int fvgBorn = na
+bullFvg = low > high[2]
+bearFvg = high < low[2]
+if bullFvg
+    fvgTop := low
+    fvgBottom := high[2]
+    fvgSide := 1
+    fvgBorn := bar_index
+else if bearFvg
+    fvgTop := low[2]
+    fvgBottom := high
+    fvgSide := -1
+    fvgBorn := bar_index
+if fvgSide == 1 and close < fvgBottom
+    fvgSide := -2
+else if fvgSide == -1 and close > fvgTop
+    fvgSide := 2
+if not na(fvgBorn) and bar_index - fvgBorn > maxZoneAge
+    fvgSide := 0
+
+// Last opposite candle before a confirmed local structure break: mechanical OB proxy.
+ph = ta.pivothigh(high, pivotBars, pivotBars)
+pl = ta.pivotlow(low, pivotBars, pivotBars)
+var float lastHigh = na
+var float lastLow = na
+if not na(ph)
+    lastHigh := ph
+if not na(pl)
+    lastLow := pl
+breakUp = not na(lastHigh) and close > lastHigh and close[1] <= lastHigh
+breakDown = not na(lastLow) and close < lastLow and close[1] >= lastLow
+var float obTop = na
+var float obBottom = na
+var int obSide = 0
+var int obBorn = na
+if breakUp and close[1] < open[1]
+    obTop := high[1]
+    obBottom := low[1]
+    obSide := 1
+    obBorn := bar_index
+else if breakDown and close[1] > open[1]
+    obTop := high[1]
+    obBottom := low[1]
+    obSide := -1
+    obBorn := bar_index
+if not na(obBorn) and bar_index - obBorn > maxZoneAge
+    obSide := 0
+
+bullEngulf = close > open and close[1] < open[1] and open <= close[1] and close >= open[1]
+bearEngulf = close < open and close[1] > open[1] and open >= close[1] and close <= open[1]
+fvgBullTaken = fvgSide == -1 and not na(fvgBorn) and bar_index > fvgBorn and open <= fvgTop and close > fvgTop
+fvgBearTaken = fvgSide == 1 and not na(fvgBorn) and bar_index > fvgBorn and open >= fvgBottom and close < fvgBottom
+ifvgBullTaken = fvgSide == 2 and open <= fvgTop and close > fvgTop
+ifvgBearTaken = fvgSide == -2 and open >= fvgBottom and close < fvgBottom
+obBullTaken = obSide == -1 and open <= obTop and close > obTop
+obBearTaken = obSide == 1 and open >= obBottom and close < obBottom
+engulfBullZone = bullEngulf and (fvgBullTaken or ifvgBullTaken or obBullTaken)
+engulfBearZone = bearEngulf and (fvgBearTaken or ifvgBearTaken or obBearTaken)
+
+// London high/low sweep before NY continuation, chiefly for NQ and ES.
+inLondon = not na(time(timeframe.period, londonHours, "America/New_York"))
+inNewYork = not na(time(timeframe.period, newYorkHours, "America/New_York"))
+var float londonHigh = na
+var float londonLow = na
+var bool sweptHigh = false
+var bool sweptLow = false
+if inLondon and not inLondon[1]
+    londonHigh := high
+    londonLow := low
+    sweptHigh := false
+    sweptLow := false
+else if inLondon
+    londonHigh := math.max(nz(londonHigh, high), high)
+    londonLow := math.min(nz(londonLow, low), low)
+if inNewYork and not na(londonLow)
+    sweptLow := sweptLow or low < londonLow
+    sweptHigh := sweptHigh or high > londonHigh
+sym = str.upper(syminfo.ticker)
+isIndex = str.contains(sym, "NQ") or str.contains(sym, "NAS") or str.contains(sym, "US100") or str.contains(sym, "ES") or str.contains(sym, "SPX") or str.contains(sym, "US500")
+sessionBullOK = not requireSweep or not isIndex or (inNewYork and sweptLow)
+sessionBearOK = not requireSweep or not isIndex or (inNewYork and sweptHigh)
+
+// Engulf arms the setup; a close through the last confirmed swing confirms MSP.
+var int armedBull = na
+var int armedBear = na
+if barstate.isconfirmed and bias == 1 and engulfBullZone
+    armedBull := bar_index
+if barstate.isconfirmed and bias == -1 and engulfBearZone
+    armedBear := bar_index
+if not na(armedBull) and bar_index - armedBull > confirmBars
+    armedBull := na
+if not na(armedBear) and bar_index - armedBear > confirmBars
+    armedBear := na
+bullSignal = barstate.isconfirmed and bias == 1 and not na(armedBull) and breakUp and sessionBullOK
+bearSignal = barstate.isconfirmed and bias == -1 and not na(armedBear) and breakDown and sessionBearOK
+if bullSignal
+    armedBull := na
+if bearSignal
+    armedBear := na
+
+plotshape(showAllEngulfs and bullEngulf, "All bullish engulfs", shape.circle, location.belowbar, color.new(color.lime, 55), size = size.tiny)
+plotshape(showAllEngulfs and bearEngulf, "All bearish engulfs", shape.circle, location.abovebar, color.new(color.red, 55), size = size.tiny)
+plotshape(engulfBullZone and bias == 1, "Bull zone engulf", shape.triangleup, location.belowbar, color.lime, size = size.tiny, text = "E")
+plotshape(engulfBearZone and bias == -1, "Bear zone engulf", shape.triangledown, location.abovebar, color.red, size = size.tiny, text = "E")
+plotshape(bullSignal, "Bull setup", shape.labelup, location.belowbar, color.lime, text = "LONG")
+plotshape(bearSignal, "Bear setup", shape.labeldown, location.abovebar, color.red, text = "SHORT")
+plot(londonHigh, "London high", color.new(color.orange, 65), style = plot.style_linebr)
+plot(londonLow, "London low", color.new(color.aqua, 65), style = plot.style_linebr)
+
+var table status = table.new(position.top_right, 1, 1)
+if barstate.islast
+    table.cell(status, 0, 0, bias == 1 ? "DAILY BIAS: YUKARI" : bias == -1 ? "DAILY BIAS: AŞAĞI" : "DAILY BIAS: BELİRSİZ", bgcolor = bias == 1 ? color.green : bias == -1 ? color.red : color.gray, text_color = color.white)
+
+alertcondition(bullSignal, "Parca long setup", "Parca LONG | {{ticker}} | {{interval}} | close={{close}}")
+alertcondition(bearSignal, "Parca short setup", "Parca SHORT | {{ticker}} | {{interval}} | close={{close}}")

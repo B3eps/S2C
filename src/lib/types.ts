@@ -7,7 +7,7 @@ export const TF_MS: Record<TF, number> = {
   '1h': 3_600_000,
   '4h': 14_400_000,
 };
-export const TF_LABEL: Record<TF, string> = { '1m': '1d', '5m': '5d', '15m': '15d', '1h': '1s', '4h': '4s' };
+export const TF_LABEL: Record<TF, string> = { '1m': '1dk', '5m': '5dk', '15m': '15dk', '1h': '1sa', '4h': '4sa' };
 
 export interface Bar {
   t: number; // open time, ms UTC
@@ -153,8 +153,8 @@ export interface Account {
 }
 
 export type DrawingKind =
-  | 'trend' | 'ray' | 'extended' | 'hline' | 'hray' | 'vline' | 'cross'
-  | 'channel' | 'regression' | 'pitchfork' | 'fib' | 'rect' | 'longpos' | 'shortpos' | 'measure';
+  | 'trend' | 'arrow' | 'ray' | 'extended' | 'hline' | 'hray' | 'vline' | 'cross'
+  | 'channel' | 'regression' | 'pitchfork' | 'fib' | 'rect' | 'longpos' | 'shortpos' | 'measure' | 'text';
 export interface Anchor {
   t: number;
   p: number;
@@ -166,6 +166,14 @@ export interface Drawing {
   b: Anchor;
   /** third anchor: channel width, pitchfork second pivot, position stop */
   c?: Anchor;
+  /** stroke colour override (a CSS colour); undefined = the theme ink */
+  color?: string;
+  /** label of a text drawing */
+  text?: string;
+  /** a locked drawing cannot be dragged */
+  locked?: boolean;
+  /** stroke width in px (1, 2 or 3) */
+  width?: number;
 }
 
 export interface SessionRec {

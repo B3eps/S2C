@@ -69,6 +69,14 @@ export function Stats() {
         </div>
       </div>
       <div className="page-body">
+        {s.count === 0 && (
+          <div className="stats-none">
+            <h2>Henüz tamamlanan işlem yok</h2>
+            <p>Bir seansta ilk işlemini kapattığında performans eğrin, kazanma oranın, R dağılımın ve saat haritan burada belirir.</p>
+            <button className="btn primary" onClick={() => useApp.getState().go('dashboard')}>Hesaplara git</button>
+          </div>
+        )}
+        {s.count > 0 && (<>
         <div className="dash-row stats-charts">
           <section className="panel">
             <div className="panel-head">
@@ -105,13 +113,14 @@ export function Stats() {
         </div>
         <PerformanceCalendar trades={list} />
         <section className="panel stats-heat"><div className="panel-head"><h2>Saat × gün</h2><span className="muted">İşlemlerin giriş saatlerine göre</span></div><div className="panel-body">{list.length ? <Heatmap trades={list} /> : <div className="empty">İşlem saatlerinin dağılımı burada görünecek.</div>}</div></section>
+        </>)}
         <div className="stats-section-title"><h2>Hesap hareketleri</h2><span>Seçili hesapların tüm zamanlardaki ücretleri ve ödemeleri</span></div>
         <div className="stats-money">
           <div><span>Harcanan</span><strong className="down">{money(spent)}</strong></div>
           <div><span>Çekilen</span><strong className="up">{money(earned)}</strong></div>
           <div><span>Net</span><strong className={earned - spent > 0 ? 'up' : earned - spent < 0 ? 'down' : ''}>{signedMoney(earned - spent)}</strong></div>
         </div>
-        <section className="panel">
+        {s.count > 0 && <section className="panel">
           <div className="panel-head">
             <h2>Yöne göre</h2>
           </div>
@@ -142,7 +151,7 @@ export function Stats() {
               ))}
             </tbody>
           </table>
-        </section>
+        </section>}
       </div>
     </div>
   );

@@ -24,7 +24,7 @@ export function NewAccount() {
         <h1>Yeni hesap</h1>
       </div>
       <div className="pkg-list">
-        <div className="tabs-row" role="tablist">
+        <div className="tabs-row pkg-tabs" role="tablist">
           {PROGRAMS.map((p) => (
             <button key={p.id} className="tab" role="tab" aria-selected={pid === p.id} onClick={() => setPid(p.id)}>
               {p.name} <span className="count">{p.kind}</span>
@@ -67,6 +67,7 @@ export function NewAccount() {
             </span>
           ) : null}
         </div>
+        <div className="pkg-grid">
         {PACKAGES.map((size) => {
           const list = prog?.prices[size];
           const price = list !== undefined ? salePrice(list) : 0;
@@ -74,11 +75,6 @@ export function NewAccount() {
             <button key={size} className="pkg" disabled={!!prog && list === undefined} onClick={() => S().createAccount(size, prog?.id)}>
               <div className="cert">
                 <div className="cert-main">
-                  <div className="cert-top">
-                    <span>XAUUSD</span>
-                    <span className="sep" />
-                    <span>{prog?.name ?? 'Özel program'}</span>
-                  </div>
                   <div className="cert-no">{money0(size)}</div>
                   <div className="rule-strip">
                     <span>
@@ -93,14 +89,14 @@ export function NewAccount() {
                   </div>
                 </div>
                 <div className="cert-grade">
-                  <span className="g-label">{prog ? 'Fiyat' : 'Aç'}</span>
                   <span className="g-value">{prog ? (list !== undefined ? money(price) : '—') : sizeLabel(size)}</span>
-                  {prog && list !== undefined ? <span className="g-sub list-price">{money(list)}</span> : <span className="g-sub">ücretsiz</span>}
+                  {prog && list !== undefined ? <span className="g-sub list-price">{money(list)}</span> : <span className="g-sub">{prog ? 'satışta yok' : 'ücretsiz'}</span>}
                 </div>
               </div>
             </button>
           );
         })}
+        </div>
       </div>
     </div>
   );

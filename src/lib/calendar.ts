@@ -23,17 +23,7 @@ const CPI = `2023-01-12 2023-02-14 2023-03-14 2023-04-12 2023-05-10 2023-06-13 2
 2025-01-15 2025-02-12 2025-03-12 2025-04-10 2025-05-13 2025-06-11 2025-07-15 2025-08-12 2025-09-11 2025-10-24 2025-12-18
 2026-01-13 2026-02-13 2026-03-11 2026-04-10 2026-05-12 2026-06-10 2026-07-14 2026-08-12 2026-09-11 2026-10-14`.split(/\s+/);
 
-function nthSunday(year: number, month: number, n: number) {
-  const d = new Date(Date.UTC(year, month, 1));
-  const first = (7 - d.getUTCDay()) % 7;
-  return Date.UTC(year, month, 1 + first + (n - 1) * 7);
-}
-
-/** US daylight time: 2nd Sunday of March → 1st Sunday of November. */
-function usDst(ms: number) {
-  const y = new Date(ms).getUTCFullYear();
-  return ms >= nthSunday(y, 2, 2) + 7 * 3_600_000 && ms < nthSunday(y, 10, 1) + 6 * 3_600_000;
-}
+import { usDst } from './market';
 
 /** New York wall time on a UTC date → UTC ms. */
 function nyTime(y: number, m: number, d: number, hh: number, mm: number) {

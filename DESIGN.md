@@ -19,7 +19,7 @@ Performance as a graded certificate. Accounts and reports are ivory label strips
 | Violation stamp | `--stamp` | `#c4412f` |
 
 Rules:
-- **Gold** is used only for the S2C hallmark, certification labels and the single primary action on a screen.
+- **Gold** is used only for the S2C hallmark, certification labels and the single primary action on a screen. Chart session bands are neutral ink tints, never gold.
 - **Selection** (tabs, pressed tools, presets, rail) is ink-1 on ply-3.
 - **Positive data** (equity curve, heatmap, goal gauge) is `--up`, never gold.
 - **Indicator series** use `SERIES` in `theme.ts`: ivory, amber, desaturated teal and coral, and warm neutrals.
@@ -28,7 +28,7 @@ Rules:
 ## Type
 - **Family:** Archivo Variable (self-hosted, `wdth` axis), with tabular numerals everywhere.
 - **Label heads:** condensed caps (`font-stretch: 76%`) with 0.06–0.08em tracking.
-- **Scale (rem):** 11, 12, 13 (base), 14, 16, 18, 22, 28, 40 (moment titles only).
+- **Scale (rem):** 12, 13, 14, 16, 18, 22, 28, 40 (moment titles only). Nothing below 12px; secondary ink is `#b9b3a7` / `#a29b8e` (≥6:1 on the plies).
 
 ## Shape and space
 - **Spacing:** 4px base scale (`--s-1..10`).
@@ -58,3 +58,11 @@ Cues: place, fill, TP, SL, warn, violation, funded, payout, print, cancel, optio
 
 ## Brand assets
 `public/brand/s2c-emblem.svg` and `public/brand/s2c-mark.svg` are hand-authored geometry: a cut-corner assay stamp with chamfered letterforms and one oblique stencil cut. The PNGs next to them are rendered from those SVGs by `scripts/render-brand.cjs` (resvg). They are not generated images.
+
+## Layout notes
+- **Accounts** are ledger rows: the ivory label on the left, the three rule gauges and actions on the right, full page width. Totals (sessions, trades, net) sit in the page head and come only from the user's real trades.
+- **Trade screen:** the bottom dock and the order panel resize by dragging their edge and fold with a double click / button; multi-pane layouts have a per-pane maximise; indicator panes fold and maximise from their own title bar.
+- **Drawings** snap to candle time and O/H/L/C by default (Alt = free); they are stored as time and price, so they survive timeframe changes. A selected drawing gets a small toolbar (colour, width 1–3, lock, copy, delete); Ctrl+C / Ctrl+V / Ctrl+D copy it three bars to the right. Tools: lines (trend, arrow, ray, extended, horizontal, vertical, cross), channel, regression, pitchfork, fib, rectangle, text note, long/short position, measure.
+- **New account:** labels sit in two columns; the program name is not repeated on every label (the tab already says it), and there is no "Fiyat" caption above the price. Sizes with no list price read "satışta yok".
+- **Settings:** ruled sections, heading left and controls right, no box per topic.
+- **Statistics with no closed trades** show one sentence and one action instead of empty charts and dashes; the performance blocks appear with the first closed trade.

@@ -146,7 +146,7 @@ export function Journal() {
             )}
           </>
         ) : (
-          <div className="empty">Bir işlem seç.</div>
+          list.length ? <div className="empty">Bir işlem seç.</div> : null
         )}
       </div>
     </div>

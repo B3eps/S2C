@@ -1,18 +1,36 @@
 import { Bar, TF, TFS, TF_MS } from './types';
+import { DayBar, dailyBars, isClosed } from './market';
 
 const MIN = 60_000;
 const DAY = 86_400_000;
 
-/** Gold does not trade on weekends: hide Fri 21:00 UTC → Sun 22:00 UTC. */
-export function isClosed(t: number) {
-  const d = new Date(t);
-  const day = d.getUTCDay();
-  const h = d.getUTCHours();
-  return (day === 5 && h >= 21) || day === 6 || (day === 0 && h < 22);
+export { isClosed };
+
+function aggregate(bars: Bar[], ms: number): Bar[] {
+  const out: Bar[] = [];
+  for (const b of bars) {
+    const t = Math.floor(b.t / ms) * ms;
+    const last = out[out.length - 1];
+    if (last && last.t === t) {
+      last.h = Math.max(last.h, b.h);
+      last.l = Math.min(last.l, b.l);
+      last.c = b.c;
+      last.v += b.v;
+    } else out.push({ ...b, t });
+  }
+  return out;
 }
 
-/** Real XAU/USD candles (Dukascopy) served by the local endpoint in vite.config.ts. */
+/**
+ * Real XAU/USD candles (Dukascopy) served by the local endpoint in vite.config.ts.
+ * 4-hour candles are built from hourly ones: a native 4-hour candle straddles the weekend
+ * close, so it cannot be filtered by its open time without losing or leaking an hour.
+ */
 async function fetchCandles(tf: TF, from: number, to: number): Promise<Bar[]> {
+  if (tf === '4h') {
+    const ms = TF_MS['4h'];
+    return aggregate(await fetchCandles('1h', Math.floor(from / ms) * ms, to), ms).filter((b) => b.t >= from);
+  }
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -83,6 +101,9 @@ export class Feed {
   minutes: Bar[] = [];
   ci = -1;
   hist = {} as Record<TF, Bar[]>;
+  /** long hourly history: enough closed trading days for the daily candles */
+  private h1Long: Bar[] = [];
+  private dayCache: { ci: number; days: DayBar[] } | null = null;
   agg = {} as Record<TF, Bar[]>;
   base0: number;
   exhausted = false;
@@ -101,7 +122,10 @@ export class Feed {
     const tick = () => onProgress?.(++done / (TFS.length + 1));
     await Promise.all(
       TFS.map(async (tf) => {
-        f.hist[tf] = await fetchBefore(tf, f.base0, HIST);
+        if (tf === '1h') {
+          f.h1Long = await fetchBefore('1h', f.base0, HIST * 4);
+          f.hist[tf] = f.h1Long.slice(-HIST);
+        } else f.hist[tf] = await fetchBefore(tf, f.base0, HIST);
         tick();
       }),
     );
@@ -200,6 +224,11 @@ export class Feed {
 
   bars(tf: TF): Bar[] {
     return this.hist[tf].concat(this.agg[tf]);
+  }
+  /** Trading-day candles (17:00 New York cut) up to the replay clock; the last one may be open. */
+  days(): DayBar[] {
+    if (this.dayCache?.ci !== this.ci) this.dayCache = { ci: this.ci, days: dailyBars(this.h1Long.concat(this.agg['1h'])) };
+    return this.dayCache.days;
   }
   aggLen(tf: TF) {
     return this.agg[tf].length;

@@ -6,6 +6,7 @@ import { Icon, IconName } from './Icon';
 
 const ICON: Record<DrawingKind, IconName> = {
   trend: 'trend',
+  arrow: 'arrow',
   ray: 'ray',
   extended: 'extended',
   hline: 'hline',
@@ -20,6 +21,7 @@ const ICON: Record<DrawingKind, IconName> = {
   longpos: 'longpos',
   shortpos: 'shortpos',
   measure: 'measure',
+  text: 'text',
 };
 
 /** Grid shape per pane count: [columns, rows]. */
@@ -91,6 +93,14 @@ export function ToolRail() {
           <Icon name={ICON[activeCat === c.id && tool !== 'cursor' ? tool : last[c.id]]} />
         </button>
       ))}
+      <button
+        className="icon-btn"
+        aria-pressed={prefs.magnet !== false}
+        title={prefs.magnet !== false ? 'Mıknatıs açık: çizim mumun O/H/L/C noktasına yapışır (Alt = serbest)' : 'Mıknatıs kapalı'}
+        onClick={() => S().setPrefs({ magnet: prefs.magnet === false })}
+      >
+        <Icon name="magnet" />
+      </button>
       <button className="icon-btn" title="Tüm çizimleri sil" disabled={!n} onClick={() => S().clearDrawings()} style={{ opacity: n ? 1 : 0.4 }}>
         <Icon name="trash" />
       </button>

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SeriesMarker, Time } from 'lightweight-charts';
 import { ChartController, LineSpec } from '../lib/chartController';
-import { getFeed, marketBus, fxBus, shooter, useApp, ticketLots, pnlOf, riskOf, Fx, LineTarget } from '../store';
+import { getFeed, marketBus, fxBus, shooter, useApp, ticketLots, pnlOf, riskOf, markPrice, spreadOf, Fx, LineTarget } from '../store';
 import { TF, TFS, TF_LABEL, TF_MS, Drawing, Anchor, Side, uid } from '../lib/types';
 import { TOOL_BY_KIND, FIB_LEVELS, regression, defaultStop } from '../lib/drawings';
 import { IND_BY_ID, ActiveInd } from '../lib/indicators';
+import { createSetupEngine, SetupResult } from '../lib/parcaSetup';
 import { eventsBetween } from '../lib/calendar';
-import { C, SERIES } from '../lib/theme';
+import { C, SERIES, alpha } from '../lib/theme';
 import { goldPrice, lots as fmtLots, rMult, signedMoney } from '../lib/format';
 import { Icon } from './Icon';
 import { IndicatorPicker, ParamPopover } from './IndicatorPicker';
@@ -29,7 +30,9 @@ interface OLine {
   dashed: boolean;
 }
 
-const sideWord = (s: Side) => (s === 'long' ? 'Long' : 'Short');
+/** last copied drawing, shared between panes (Ctrl+C / Ctrl+V / Ctrl+D) */
+let drawingClip: Drawing | null = null;
+const sideWord =(s: Side) => (s === 'long' ? 'Long' : 'Short');
 const typeWord = { market: 'Piyasa', limit: 'Limit', stop: 'Stop' } as const;
 
 /**
@@ -44,6 +47,7 @@ function useLines(): OLine[] {
   const ticket = useApp((s) => s.ticket);
   const live = useApp((s) => s.live);
   const accounts = useApp((s) => s.accounts);
+  const spread = useApp((s) => spreadOf(s.settings));
   const account = accounts.find((a) => a.id === session?.accountId);
   const S = useApp.getState;
 
@@ -89,7 +93,7 @@ function useLines(): OLine[] {
     };
 
     for (const p of session.positions) {
-      const floating = pnlOf(p.side, p.entry, live.price, p.lots);
+      const floating = pnlOf(p.side, p.entry, markPrice(p.side, live.price, spread), p.lots);
       const risk = riskOf(p.entry, p.initialSl, p.lots);
       out.push({
         key: `p-${p.id}`,
@@ -144,7 +148,7 @@ function useLines(): OLine[] {
       levels('t', ticket.side, entry, l, ticket.sl, ticket.tp, 'ticket', undefined, 'ghost');
     }
     return out;
-  }, [session, ticket, live.price, account]);
+  }, [session, ticket, live.price, account, spread]);
 }
 
 export function ChartPanel({ index }: { index: number }) {
@@ -162,8 +166,12 @@ export function ChartPanel({ index }: { index: number }) {
   const pane = prefs.panes[index];
   const tf: TF = pane.tf;
   const inds: ActiveInd[] = pane.ind;
+  const setupInd = inds.find((ind) => ind.id === 'parca-setup' && !ind.hidden);
   const [ver, setVer] = useState(0);
   const [barsLen, setBarsLen] = useState(0);
+  const [setup, setSetup] = useState<SetupResult | null>(null);
+  const setupMemo = useRef<{ engineKey: string; engine: ReturnType<typeof createSetupEngine>; key: string; result: SetupResult } | null>(null);
+  const setupBias = setup?.bias ?? 0;
   const [values, setValues] = useState<Record<string, Record<string, number>>>({});
   const [picker, setPicker] = useState(false);
   const [editing, setEditing] = useState<{ uid: string; x: number; y: number } | null>(null);
@@ -189,6 +197,7 @@ export function ChartPanel({ index }: { index: number }) {
     const f = getFeed();
     if (f) {
       const bars = f.bars(tf);
+      ctrl.context = { days: f.days() };
       ctrl.reset(bars, tf);
       setBarsLen(bars.length);
     }
@@ -235,8 +244,11 @@ export function ChartPanel({ index }: { index: number }) {
       const ctrl = ctrlRef.current;
       if (!f || !ctrl) return;
       const bars = f.bars(tf);
-      if (kind === 'reset') ctrl.reset(bars, tf);
-      else ctrl.update(bars);
+      ctrl.context = { days: f.days() };
+      if (kind === 'reset') {
+        ctrl.reset(bars, tf);
+        setVer((v) => v + 1);
+      } else ctrl.update(bars);
       setBarsLen(bars.length);
     });
   }, [tf]);
@@ -246,8 +258,14 @@ export function ChartPanel({ index }: { index: number }) {
     const f = getFeed();
     const ctrl = ctrlRef.current;
     if (!f || !ctrl) return;
+    ctrl.context = { days: f.days() };
     ctrl.reset(f.bars(tf), tf);
     setBarsLen(f.bars(tf).length);
+    // the drawing layer read the old timeframe's bars during this render: draw it again
+    setSelected(null);
+    setDraft(null);
+    setVer((v) => v + 1);
+    requestAnimationFrame(() => setVer((v) => v + 1));
   }, [tf]);
 
   // price: hidden as an index by default, real on demand
@@ -260,6 +278,8 @@ export function ChartPanel({ index }: { index: number }) {
   const indKey = JSON.stringify(inds);
   useEffect(() => {
     ctrlRef.current?.setIndicators(inds);
+    const t = setTimeout(() => setVer((v) => v + 1), 150);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [indKey]);
 
@@ -286,8 +306,33 @@ export function ChartPanel({ index }: { index: number }) {
     for (const e of eventsBetween(first, f.clock)) {
       m.push({ time: ctrl.bucket(e.t), position: 'aboveBar', shape: 'square', color: C.gold, text: e.label, size: 0.7 });
     }
+    if (setupInd) {
+      // Only closed candles count, so the result changes when a chart candle or an hour closes.
+      const closedBars = Math.floor(f.clock / TF_MS[tf]);
+      const key = `${tf}|${first}|${closedBars}|${Math.floor(f.clock / 3_600_000)}|${JSON.stringify(setupInd.params)}`;
+      if (setupMemo.current?.key !== key) {
+        // one engine per chart history and parameter set; it only processes newly closed candles
+        const engineKey = `${tf}|${first}|${JSON.stringify(setupInd.params)}`;
+        const engine = setupMemo.current?.engineKey === engineKey ? setupMemo.current.engine : createSetupEngine(tf, setupInd.params);
+        const result = engine({ bars: ctrl.bars, clock: f.clock, days: f.days(), series: { '15m': f.bars('15m'), '1h': f.bars('1h'), '4h': f.bars('4h') } });
+        setupMemo.current = { engineKey, engine, key, result };
+        setSetup({ ...result });
+      }
+      for (const mark of setupMemo.current!.result.marks) {
+        m.push({
+          time: ctrl.bucket(mark.t), position: mark.side === 'long' ? 'belowBar' : 'aboveBar',
+          shape: mark.kind === 'signal' ? (mark.side === 'long' ? 'arrowUp' : 'arrowDown') : mark.kind === 'sweep' ? 'square' : 'circle',
+          color: mark.kind === 'sweep' ? C.gold : mark.side === 'long' ? C.up : C.down,
+          text: mark.kind === 'signal' ? 'PARÇA' : mark.source,
+          size: mark.kind === 'signal' ? 1.5 : 0.7,
+        });
+      }
+    } else if (setupMemo.current) {
+      setupMemo.current = null;
+      setSetup(null);
+    }
     ctrl.setMarkers(m.filter((x) => (x.time as number) * 1000 >= first));
-  }, [sessionTrades, session?.positions.length, barsLen, tf, session]);
+  }, [sessionTrades, session?.positions.length, barsLen, tf, session, indKey]);
 
   // fx
   useEffect(() => {
@@ -308,6 +353,24 @@ export function ChartPanel({ index }: { index: number }) {
   // keyboard: delete selected drawing
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const typing = !!(e.target as HTMLElement).closest('input,textarea');
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && !typing && (e.key === 'c' || e.key === 'v' || e.key === 'd')) {
+        if (e.key === 'c' || e.key === 'd') {
+          const d = useApp.getState().session?.drawings.find((x) => x.id === selected);
+          if (d) drawingClip = d;
+          if (e.key === 'c' || !d) return;
+        }
+        if (!drawingClip || !primary) return;
+        e.preventDefault();
+        const dt = TF_MS[tf] * 3;
+        const sh = (a: Anchor) => ({ t: a.t + dt, p: a.p });
+        const copy: Drawing = { ...drawingClip, id: uid(), a: sh(drawingClip.a), b: sh(drawingClip.b), ...(drawingClip.c ? { c: sh(drawingClip.c) } : {}), locked: false };
+        drawingClip = copy;
+        useApp.getState().addDrawing(copy);
+        setSelected(copy.id);
+        return;
+      }
       if (!selected) return;
       if ((e.key === 'Delete' || e.key === 'Backspace') && !(e.target as HTMLElement).closest('input,textarea')) {
         useApp.getState().removeDrawing(selected);
@@ -317,7 +380,7 @@ export function ChartPanel({ index }: { index: number }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selected]);
+  }, [selected, primary, tf]);
 
   const ctrl = ctrlRef.current;
   const S = useApp.getState;
@@ -325,8 +388,13 @@ export function ChartPanel({ index }: { index: number }) {
     const r = hostRef.current!.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
-  const toAnchor = (e: { clientX: number; clientY: number }) => {
+  const magnet = prefs.magnet !== false;
+  const toAnchor = (e: { clientX: number; clientY: number; altKey?: boolean }, snap = true) => {
     const { x, y } = localXY(e);
+    if (snap && magnet && !e.altKey) {
+      const s = ctrl?.snap(x, y);
+      if (s) return s;
+    }
     const t = ctrl?.xToTime(x);
     const p = ctrl?.yToPrice(y);
     if (t == null || p == null) return null;
@@ -401,7 +469,7 @@ export function ChartPanel({ index }: { index: number }) {
       return;
     }
     if (def.points === 1) {
-      finishDraft({ id: uid(), kind: tool, a, b: a });
+      finishDraft({ id: uid(), kind: tool, a, b: a, ...(tool === 'text' ? { text: 'Not' } : {}) });
       return;
     }
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -439,11 +507,12 @@ export function ChartPanel({ index }: { index: number }) {
     e.stopPropagation();
     e.preventDefault();
     setSelected(d.id);
+    if (d.locked) return;
     const el = e.currentTarget as Element;
     el.setPointerCapture(e.pointerId);
-    const start = toAnchor(e);
+    const start = toAnchor(e, false);
     const move = (ev: PointerEvent) => {
-      const p = toAnchor(ev);
+      const p = toAnchor(ev, which !== 'both');
       if (!p || !start) return;
       if (which === 'both') {
         const dt = p.t - start.t;
@@ -473,6 +542,10 @@ export function ChartPanel({ index }: { index: number }) {
   const plotW = Math.max(0, width - scaleW);
   const paneH = ctrl?.mainPaneHeight() ?? 0;
   const drawings = [...(session?.drawings ?? []), ...(draft ? [draft.d] : [])];
+  // the zones nearest to price: every live zone at once would bury the candles
+  const setupZones = setupInd && setup
+    ? [...setup.zones].sort((a, b) => Math.min(Math.abs(a.top - live.price), Math.abs(a.bottom - live.price)) - Math.min(Math.abs(b.top - live.price), Math.abs(b.bottom - live.price))).slice(0, 8)
+    : [];
   void ver;
 
   const renderDrawing = (d: Drawing) => {
@@ -504,7 +577,7 @@ export function ChartPanel({ index }: { index: number }) {
     const Line = (l: { x1: number; y1: number; x2: number; y2: number }, key: string, extra = '') => (
       <g key={key}>
         <line {...l} className="dhit" onPointerDown={body} />
-        <line {...l} className={`${cls} ${extra}`} style={{ pointerEvents: 'none' }} />
+        <line {...l} className={`${cls} ${extra}`} style={{ pointerEvents: 'none', ...(d.color ? { stroke: d.color } : {}), ...(d.width ? { strokeWidth: d.width } : {}) }} />
       </g>
     );
     const Label = (x: number, y: number, text: string, key: string, anchor: 'start' | 'end' | 'middle' = 'start', tone = '') => (
@@ -521,10 +594,36 @@ export function ChartPanel({ index }: { index: number }) {
     switch (d.kind) {
       case 'trend':
         return <g key={d.id}>{Line({ x1: ax, y1: ay, x2: bx, y2: by }, 'l')}{H('a', ax, ay)}{H('b', bx, by)}</g>;
+      case 'arrow': {
+        const len = Math.hypot(bx - ax, by - ay) || 1;
+        const ux = (bx - ax) / len;
+        const uy = (by - ay) / len;
+        const hs = 9 + (d.width ?? 1) * 1.5;
+        const p1 = `${bx - ux * hs - uy * hs * 0.5},${by - uy * hs + ux * hs * 0.5}`;
+        const p2 = `${bx - ux * hs + uy * hs * 0.5},${by - uy * hs - ux * hs * 0.5}`;
+        return (
+          <g key={d.id}>
+            {Line({ x1: ax, y1: ay, x2: bx - ux * 2, y2: by - uy * 2 }, 'l')}
+            <polygon points={`${bx},${by} ${p1} ${p2}`} className="darrow" style={{ pointerEvents: 'none', fill: d.color ?? (sel ? 'var(--ink-1)' : 'var(--ink-2)') }} />
+            {H('a', ax, ay)}
+            {H('b', bx, by)}
+          </g>
+        );
+      }
       case 'ray':
         return <g key={d.id}>{Line(ext(ax, ay, bx, by, 'dir'), 'l')}{H('a', ax, ay)}{H('b', bx, by)}</g>;
       case 'extended':
         return <g key={d.id}>{Line(ext(ax, ay, bx, by, 'both'), 'l')}{H('a', ax, ay)}{H('b', bx, by)}</g>;
+      case 'text':
+        return (
+          <g key={d.id}>
+            <text x={ax + 6} y={ay - 6} className="dtext" style={d.color ? { fill: d.color } : undefined} onPointerDown={body}>
+              {d.text || 'Not'}
+            </text>
+            <circle cx={ax} cy={ay} r={3} className="dpin" style={d.color ? { fill: d.color } : undefined} />
+            {H('a', ax, ay)}
+          </g>
+        );
       case 'hline':
         return <g key={d.id}>{Line({ x1: 0, y1: ay, x2: W, y2: ay }, 'l')}{H('a', Math.min(Math.max(ax, 8), W - 8), ay)}</g>;
       case 'hray':
@@ -668,6 +767,11 @@ export function ChartPanel({ index }: { index: number }) {
     return null;
   };
 
+  const maxPane = useApp((s) => s.maxPane);
+  const multi = prefs.count > 1;
+  const separate = inds.filter((i) => IND_BY_ID[i.id]?.pane === 'separate');
+  const rects = ctrl ? ctrl.paneRects() : [];
+  const FOLD = 26;
   const setTf = (t: TF) => setPane(index, { tf: t });
   const setInds = (list: ActiveInd[]) => setPane(index, { ind: list });
 
@@ -685,7 +789,20 @@ export function ChartPanel({ index }: { index: number }) {
         <button className="btn sm ghost" onClick={() => setPicker(true)}>
           <Icon name="wave" size={16} /> İndikatör
         </button>
+        {multi && (
+          <button
+            className="icon-btn sm head-end"
+            title={maxPane === index ? 'Tüm grafikleri göster' : 'Bu grafiği büyüt'}
+            aria-pressed={maxPane === index}
+            onClick={() => S().setMaxPane(maxPane === index ? null : index)}
+          >
+            <Icon name={maxPane === index ? 'shrink' : 'expand'} size={14} />
+          </button>
+        )}
         <div className="legend">
+          {setupInd && <span className="chip" aria-label="Parça Setup günlük yönü" style={{ color: setupBias === 1 ? C.up : setupBias === -1 ? C.down : C.ink2 }}>
+            BIAS: {setupBias === 1 ? 'YUKARI' : setupBias === -1 ? 'AŞAĞI' : 'BELİRSİZ'}
+          </span>}
           {inds.map((ind) => {
             const def = IND_BY_ID[ind.id];
             if (!def) return null;
@@ -696,7 +813,7 @@ export function ChartPanel({ index }: { index: number }) {
                 <span className="sw" style={{ background: ind.colors[0] ?? SERIES[0] }} />
                 <span>
                   {def.short}
-                  {def.params.length ? ` ${def.params.map((p) => ind.params[p.key]).join(' ')}` : ''}
+                  {def.params.length ? ` ${def.params.slice(0, 3).map((p) => ind.params[p.key] ?? p.def).join(' ')}` : ''}
                 </span>
                 {showVals &&
                   def.outputs.slice(0, 3).map((o, i) => (
@@ -718,7 +835,14 @@ export function ChartPanel({ index }: { index: number }) {
           })}
         </div>
       </div>
-      <div className="chart-host" onContextMenu={onContext} onPointerDown={() => setMenu(null)}>
+      <div
+        className="chart-host"
+        onContextMenu={onContext}
+        onPointerDown={() => {
+          setMenu(null);
+          if (tool === 'cursor') setSelected(null);
+        }}
+      >
         <div ref={hostRef} className="chart-canvas" />
         <div className="chart-overlay">
           <svg>
@@ -727,10 +851,103 @@ export function ChartPanel({ index }: { index: number }) {
                 <rect x={0} y={0} width={plotW} height={paneH} />
               </clipPath>
             </defs>
+            <g clipPath={`url(#clip-${slot})`} style={{ pointerEvents: 'none' }}>
+              {setupZones.map((z, i) => {
+                const y1 = ctrl?.priceToY(z.top), y2 = ctrl?.priceToY(z.bottom);
+                const x = ctrl?.timeToX(z.from);
+                if (y1 == null || y2 == null || x == null) return null;
+                const tone = z.side === 1 ? C.up : C.down;
+                const x1 = Math.max(0, Math.min(x, plotW - 40));
+                return (
+                  <g key={i}>
+                    <rect x={x1} y={y1} width={plotW - x1} height={Math.max(1, y2 - y1)} fill={alpha(tone, 0.08)} stroke={alpha(tone, 0.28)} strokeWidth={1} />
+                    <text x={plotW - 4} y={y1 + 10} textAnchor="end" style={{ fill: alpha(tone, 0.8), fontSize: 9, fontWeight: 600 }}>
+                      {z.tf === tf ? z.source : `${TF_LABEL[z.tf]} ${z.source}`}
+                    </text>
+                  </g>
+                );
+              })}
+            </g>
             <g clipPath={`url(#clip-${slot})`} style={{ pointerEvents: tool === 'cursor' ? undefined : 'none' }}>
               {drawings.map(renderDrawing)}
             </g>
           </svg>
+          {(() => {
+            const d = session?.drawings.find((x) => x.id === selected);
+            if (!d || !ctrl || tool !== 'cursor') return null;
+            const ax = ctrl.timeToX(d.a.t);
+            const ay = ctrl.priceToY(d.a.p);
+            if (ax == null || ay == null) return null;
+            const upd = (p: Partial<Drawing>) => S().updateDrawing({ ...d, ...p });
+            const SW = [undefined, C.ink1, C.up, C.down, C.warn, '#8ea3a8'];
+            return (
+              <div className="dtool" style={{ left: Math.max(4, Math.min(ax - 10, plotW - 250)), top: Math.max(4, ay - 44) }} onPointerDown={(e) => e.stopPropagation()}>
+                {d.kind === 'text' && (
+                  <input className="input" autoFocus value={d.text ?? ''} maxLength={60} placeholder="Not" onChange={(e) => upd({ text: e.target.value })} />
+                )}
+                {SW.map((c, i) => (
+                  <button key={i} className={`sw ${d.color === c ? 'on' : ''}`} title={c ? 'Renk' : 'Varsayılan renk'} style={{ background: c ?? 'var(--ink-2)' }} onClick={() => upd({ color: c })} />
+                ))}
+                <button title={`Kalınlık: ${d.width ?? 1}`} className="wbtn" onClick={() => upd({ width: ((d.width ?? 1) % 3) + 1 })}>
+                  <svg width="16" height="16" viewBox="0 0 16 16"><path d="M2 8h12" stroke="currentColor" strokeWidth={d.width ?? 1} strokeLinecap="round" /></svg>
+                </button>
+                <button title={d.locked ? 'Kilidi aç' : 'Kilitle'} aria-pressed={!!d.locked} onClick={() => upd({ locked: !d.locked })}>
+                  <Icon name="lock" size={14} />
+                </button>
+                <button
+                  title="Kopyala"
+                  onClick={() => {
+                    const dt = TF_MS[tf] * 3;
+                    const sh = (a: Anchor) => ({ t: a.t + dt, p: a.p });
+                    const copy: Drawing = { ...d, id: uid(), a: sh(d.a), b: sh(d.b), ...(d.c ? { c: sh(d.c) } : {}), locked: false };
+                    S().addDrawing(copy);
+                    setSelected(copy.id);
+                  }}
+                >
+                  <Icon name="copy" size={14} />
+                </button>
+                <button
+                  title="Sil"
+                  onClick={() => {
+                    S().removeDrawing(d.id);
+                    setSelected(null);
+                  }}
+                >
+                  <Icon name="trash" size={14} />
+                </button>
+              </div>
+            );
+          })()}
+          {rects.slice(1).map((r, k) => {
+            const ind = separate[k];
+            const def = ind && IND_BY_ID[ind.id];
+            const folded = r.height <= FOLD + 4;
+            return (
+              <div key={k} className="pane-bar" style={{ top: r.top + 3, right: scaleW + 6 }}>
+                <span>{def ? def.short : ''}</span>
+                <button
+                  title={folded ? 'Paneli aç' : 'Paneli küçült'}
+                  onClick={() => {
+                    ctrl?.setPaneMode(k + 1, 'toggle');
+                    requestAnimationFrame(() => requestAnimationFrame(() => setVer((v) => v + 1)));
+                    setTimeout(() => setVer((v) => v + 1), 120);
+                  }}
+                >
+                  <Icon name={folded ? 'expand' : 'shrink'} size={12} />
+                </button>
+                <button
+                  title="Bu paneli büyüt"
+                  onClick={() => {
+                    ctrl?.setPaneMode(k + 1, 'max');
+                    requestAnimationFrame(() => requestAnimationFrame(() => setVer((v) => v + 1)));
+                    setTimeout(() => setVer((v) => v + 1), 120);
+                  }}
+                >
+                  <Icon name="chevron" size={12} />
+                </button>
+              </div>
+            );
+          })}
           {tool !== 'cursor' && <div className="draw-capture" onPointerDown={onDrawDown} onPointerMove={onDrawMove} onPointerUp={onDrawUp} />}
           {ctrl &&
             lines.map((l) => {

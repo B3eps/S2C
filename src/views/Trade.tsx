@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useApp, SPEEDS, ticketLots, riskOf, pnlOf, accountLimits, countedDays, passBlocker, payoutBlocker, consistencyScore } from '../store';
+import { useApp, SPEEDS, ticketLots, riskOf, pnlOf, markPrice, spreadOf, accountLimits, countedDays, passBlocker, payoutBlocker, consistencyScore } from '../store';
 import { ChartPanel } from '../components/ChartPanel';
 import { ToolRail, GRID } from '../components/ToolRail';
 import { CertLabel, CountUp, RuleGauges } from '../components/bits';
@@ -12,6 +12,12 @@ export function Trade() {
   const session = useApp((s) => s.session);
   const loading = useApp((s) => s.loading);
   const prefs = useApp((s) => s.prefs);
+  const maxPane = useApp((s) => s.maxPane);
+  const orderOpen = prefs.orderOpen !== false;
+  const dockOpen = prefs.dockOpen !== false;
+  const orderW = Math.max(260, Math.min(prefs.orderW ?? 304, 520));
+  const dockH = Math.max(120, Math.min(prefs.dockH ?? 232, 520, Math.round(window.innerHeight * 0.5)));
+  const [cols, rows] = maxPane !== null && maxPane < prefs.count ? [1, 1] : GRID[prefs.count] ?? [1, 1];
 
   // Space reveals the next bar
   useEffect(() => {
@@ -28,22 +34,32 @@ export function Trade() {
 
   if (loading || !session) return <Loading />;
   return (
-    <div className="trade">
+    <div className="trade" style={{ gridTemplateRows: `56px minmax(0, 1fr) ${dockOpen ? dockH : 44}px` }}>
       <TopBar />
-      <div className="trade-body">
+      <div className="trade-body" style={{ gridTemplateColumns: `48px minmax(0, 1fr) ${orderOpen ? orderW + 'px' : '28px'}` }}>
         <ToolRail />
-        <div
-          className="charts grid"
-          style={{ gridTemplateColumns: `repeat(${GRID[prefs.count]?.[0] ?? 1}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${GRID[prefs.count]?.[1] ?? 1}, minmax(0, 1fr))` }}
-        >
+        <div className="charts grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))` }}>
           {Array.from({ length: prefs.count }, (_, i) => (
-            <ChartPanel key={i} index={i} />
+            <div key={i} className="chart-slot" hidden={maxPane !== null && maxPane < prefs.count && maxPane !== i}>
+              <ChartPanel index={i} />
+            </div>
           ))}
         </div>
-        <OrderPanel />
+        {orderOpen ? <OrderPanel /> : <OrderFold />}
       </div>
       <Dock />
     </div>
+  );
+}
+
+function OrderFold() {
+  return (
+    <aside className="order folded" aria-label="Emir paneli kapalı">
+      <button className="icon-btn sm" title="Emir panelini aç" onClick={() => useApp.getState().setPrefs({ orderOpen: true })}>
+        <Icon name="chevron" size={14} style={{ transform: 'rotate(90deg)' }} />
+      </button>
+      <span className="fold-label">Emir</span>
+    </aside>
   );
 }
 
@@ -148,6 +164,7 @@ function OrderPanel() {
   const editing = useApp((s) => s.editing);
   if (!account || !session) return <div className="order" />;
   const lim = accountLimits(account, session);
+  const prefs = useApp((s) => s.prefs);
   const edited = editing ? (editing.kind === 'order' ? session.orders.find((o) => o.id === editing.id) : session.positions.find((p) => p.id === editing.id)) : undefined;
 
   const side = ticket?.side;
@@ -162,6 +179,27 @@ function OrderPanel() {
 
   return (
     <aside className="order" aria-label="Emir">
+      <div
+        className="order-grip"
+        title="Genişliği ayarlamak için sürükle"
+        onPointerDown={(e) => {
+          e.preventDefault();
+          const x0 = e.clientX;
+          const w0 = prefs.orderW ?? 304;
+          const el = e.currentTarget;
+          el.setPointerCapture(e.pointerId);
+          const move = (ev: PointerEvent) => S().setPrefs({ orderW: Math.max(260, Math.min(520, w0 + (x0 - ev.clientX))) });
+          const up = () => {
+            el.removeEventListener('pointermove', move);
+            el.removeEventListener('pointerup', up);
+          };
+          el.addEventListener('pointermove', move);
+          el.addEventListener('pointerup', up);
+        }}
+      />
+      <button className="order-fold icon-btn sm" title="Emir panelini kapat" onClick={() => S().setPrefs({ orderOpen: false })}>
+        <Icon name="chevron" size={14} style={{ transform: 'rotate(-90deg)' }} />
+      </button>
       <div className="order-sec">
         <div className="side-pick">
           <button className="side-btn long" aria-pressed={side === 'long'} onClick={() => (ticket ? S().updateTicket({ side: 'long' }) : S().openTicket('long'))}>
@@ -459,7 +497,7 @@ function EditPanel({ kind, id }: { kind: 'order' | 'pos'; id: string }) {
             <dt>Lot</dt>
             <dd>{fmtLots(p!.lots)}</dd>
             <dt>Açık K/Z</dt>
-            <dd className={pnlOf(p!.side, p!.entry, live.price, p!.lots) >= 0 ? 'up' : 'down'}>{signedMoney(pnlOf(p!.side, p!.entry, live.price, p!.lots))}</dd>
+            <dd className={pnlOf(p!.side, p!.entry, markPrice(p!.side, live.price, spreadOf(useApp.getState().settings)), p!.lots) >= 0 ? 'up' : 'down'}>{signedMoney(pnlOf(p!.side, p!.entry, markPrice(p!.side, live.price, spreadOf(useApp.getState().settings)), p!.lots))}</dd>
           </dl>
         )}
       </div>
@@ -501,8 +539,27 @@ function Dock() {
   const live = useApp((s) => s.live);
   const editing = useApp((s) => s.editing);
   const S = useApp.getState;
+  const open = prefs.dockOpen !== false;
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const y0 = e.clientY;
+    const h0 = prefs.dockH ?? 232;
+    const el = e.currentTarget as HTMLElement;
+    el.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      const h = Math.max(120, Math.min(520, h0 + (y0 - ev.clientY)));
+      S().setPrefs({ dockH: h, dockOpen: true });
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+  };
   return (
-    <div className="dock">
+    <div className={`dock ${open ? '' : 'folded'}`}>
+      <div className="dock-grip" onPointerDown={startResize} onDoubleClick={() => S().setPrefs({ dockOpen: !open })} title="Yüksekliği ayarlamak için sürükle, katlamak için çift tıkla" />
       <div className="replay-bar">
         <button className={`play ${playing ? 'on' : ''}`} title={playing ? 'Duraklat' : 'Oynat'} onClick={() => S().setPlaying(!playing)}>
           <Icon name={playing ? 'pause' : 'play'} size={16} />
@@ -555,7 +612,7 @@ function Dock() {
               </thead>
               <tbody>
                 {session.positions.map((p) => {
-                  const fl = pnlOf(p.side, p.entry, live.price, p.lots);
+                  const fl = pnlOf(p.side, p.entry, markPrice(p.side, live.price, spreadOf(useApp.getState().settings)), p.lots);
                   const risk = riskOf(p.entry, p.initialSl, p.lots);
                   const slR = p.sl !== undefined && risk ? pnlOf(p.side, p.entry, p.sl, p.lots) / risk : undefined;
                   const tpR = p.tp !== undefined && risk ? pnlOf(p.side, p.entry, p.tp, p.lots) / risk : undefined;

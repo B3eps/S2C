@@ -1,4 +1,5 @@
 import { Bar } from './types';
+import { DayBar, dayStart } from './market';
 
 type A = number[];
 const N = NaN;
@@ -123,8 +124,8 @@ const roc = (src: A, n: number): A => src.map((v, i) => (i >= n ? (100 * (v - sr
 const swma = (x: A): A => x.map((_, i) => (i >= 3 ? (x[i] + 2 * x[i - 1] + 2 * x[i - 2] + x[i - 3]) / 6 : N));
 
 // ── definitions ───────────────────────────────────────────────────────────────
-export type Category = 'Hareketli ortalamalar' | 'Bantlar ve kanallar' | 'Trend' | 'Momentum' | 'Oynaklık' | 'Hacim';
-export const CATEGORIES: Category[] = ['Hareketli ortalamalar', 'Bantlar ve kanallar', 'Trend', 'Momentum', 'Oynaklık', 'Hacim'];
+export type Category = 'Özel stratejiler' | 'Hareketli ortalamalar' | 'Bantlar ve kanallar' | 'Trend' | 'Momentum' | 'Oynaklık' | 'Hacim';
+export const CATEGORIES: Category[] = ['Özel stratejiler', 'Hareketli ortalamalar', 'Bantlar ve kanallar', 'Trend', 'Momentum', 'Oynaklık', 'Hacim'];
 
 export interface Param {
   key: string;
@@ -153,7 +154,12 @@ export interface IndDef {
   params: Param[];
   outputs: Output[];
   levels?: number[];
-  calc: (bars: Bar[], p: Record<string, number>) => Record<string, A>;
+  calc: (bars: Bar[], p: Record<string, number>, ctx?: IndContext) => Record<string, A>;
+}
+/** Data an indicator may need beyond the chart's own candles. */
+export interface IndContext {
+  /** trading-day candles (17:00 New York cut); the last one may still be open */
+  days?: DayBar[];
 }
 
 const P = (key: string, label: string, def: number, step = 1, min = 1, max = 500): Param => ({ key, label, def, step, min, max });
@@ -192,6 +198,14 @@ function dmi(bars: Bar[], len: number, adxLen: number) {
 }
 
 export const INDICATORS: IndDef[] = [
+  {
+    id: 'parca-setup', name: 'Parça Setup · Bias / Engulf / MSP', short: 'PARÇA', cat: 'Özel stratejiler', pane: 'overlay',
+    params: [
+      P('pivot', 'Mini yapı mum sayısı', 2, 1, 1, 8), P('window', 'Engulf sonrası teyit mumu', 8, 1, 1, 30), P('zoneAge', 'Bölge ömrü (mum)', 80, 1, 10, 300),
+      P('minGap', 'En küçük FVG (ATR katı)', 0.3, 0.05, 0, 3), P('biasMode', 'Bias: 1 günlük · 2 oylama', 1, 1, 1, 2), P('sweep', 'Likidite süpürmesi şart: 0 / 1', 0, 1, 0, 1),
+    ],
+    outputs: [], calc: () => ({}),
+  },
   // Moving averages
   MA('sma', 'Basit hareketli ortalama', 'SMA', (c, n) => sma(c, n)),
   MA('ema', 'Üssel hareketli ortalama', 'EMA', (c, n) => ema(c, n)),
@@ -381,21 +395,34 @@ export const INDICATORS: IndDef[] = [
     pane: 'overlay',
     params: [],
     outputs: [L('r2', 'R2', { dashed: true }), L('r1', 'R1', { dashed: true }), L('p', 'P'), L('s1', 'S1', { dashed: true }), L('s2', 'S2', { dashed: true })],
-    calc: (bars) => {
+    calc: (bars, _p, ctx) => {
       const out = { p: arr(bars.length), r1: arr(bars.length), s1: arr(bars.length), r2: arr(bars.length), s2: arr(bars.length) };
+      // The previous trading day (17:00 New York cut). The feed's daily candles are always whole
+      // days; without them the first day on the chart may be partial, so it is never used.
+      const days = ctx?.days;
+      let id = 0;
       let day = -1;
+      let dayNo = 0;
       let cur = { h: -Infinity, l: Infinity, c: N };
-      let prev: typeof cur | null = null;
+      let own: typeof cur | null = null;
       bars.forEach((b, i) => {
-        const d = Math.floor(b.t / 86_400_000);
-        if (d !== day) {
-          if (day !== -1) prev = cur;
-          day = d;
-          cur = { h: -Infinity, l: Infinity, c: N };
+        let prev: { h: number; l: number; c: number } | null | undefined;
+        if (days) {
+          while (id < days.length && days[id].end <= b.t) id++;
+          prev = days[id - 1];
+        } else {
+          const d = dayStart(b.t);
+          if (d !== day) {
+            own = dayNo >= 2 ? cur : null;
+            dayNo++;
+            day = d;
+            cur = { h: -Infinity, l: Infinity, c: N };
+          }
+          cur.h = Math.max(cur.h, b.h);
+          cur.l = Math.min(cur.l, b.l);
+          cur.c = b.c;
+          prev = own;
         }
-        cur.h = Math.max(cur.h, b.h);
-        cur.l = Math.min(cur.l, b.l);
-        cur.c = b.c;
         if (prev) {
           const pp = (prev.h + prev.l + prev.c) / 3;
           out.p[i] = pp;
@@ -484,14 +511,16 @@ export const INDICATORS: IndDef[] = [
     params: [],
     outputs: [L('v', 'VWAP')],
     calc: (bars) => {
-      let day = -1, pv = 0, vv = 0;
+      // Anchored at the trading-day open (17:00 New York). A day whose open is not on the chart
+      // would give the VWAP of only part of that day, so it stays empty instead.
+      let day = -1, pv = 0, vv = 0, whole = false;
       return {
-        v: bars.map((b) => {
-          const d = Math.floor(b.t / 86_400_000);
-          if (d !== day) { day = d; pv = 0; vv = 0; }
+        v: bars.map((b, i) => {
+          const d = dayStart(b.t);
+          if (d !== day) { whole = i > 0 || b.t - d <= 2 * 3_600_000; day = d; pv = 0; vv = 0; }
           pv += ((b.h + b.l + b.c) / 3) * b.v;
           vv += b.v;
-          return vv ? pv / vv : N;
+          return whole && vv ? pv / vv : N;
         }),
       };
     },

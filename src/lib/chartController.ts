@@ -3,7 +3,7 @@ import {
   LineSeries, LineStyle, Logical, SeriesMarker, Time, UTCTimestamp, createChart, createSeriesMarkers,
 } from 'lightweight-charts';
 import { C, SERIES, alpha } from './theme';
-import { ActiveInd, IND_BY_ID, IndDef } from './indicators';
+import { ActiveInd, IND_BY_ID, IndContext, IndDef } from './indicators';
 import { Bar, TF, TF_MS } from './types';
 import { marketSession } from './calendar';
 import { clockUtc } from './format';
@@ -12,8 +12,8 @@ const sec = (ms: number) => (ms / 1000) as UTCTimestamp;
 
 const BAND: Record<string, string> = {
   asia: 'rgba(0,0,0,0)',
-  london: alpha(C.gold, 0.035),
-  overlap: alpha(C.gold, 0.06),
+  london: alpha(C.ink2, 0.04),
+  overlap: alpha(C.ink2, 0.075),
   ny: alpha('#8ea3a8', 0.045),
 };
 
@@ -38,13 +38,17 @@ export class ChartController {
   bands: ISeriesApi<'Histogram'>;
   markers: ISeriesMarkersPluginApi<Time>;
   bars: Bar[] = [];
+  /** extra data for indicators (daily candles); set it before reset() / update() */
+  context: IndContext = {};
   tf: TF;
   private inds: IndRuntime[] = [];
   private lines = new Map<string, IPriceLine>();
   private indRaf = 0;
   private showBands = true;
 
+  private host: HTMLElement;
   constructor(host: HTMLElement, tf: TF) {
+    this.host = host;
     this.tf = tf;
     this.chart = createChart(host, {
       autoSize: true,
@@ -162,6 +166,7 @@ export class ChartController {
 
   // ── indicators ────────────────────────────────────────────────────────────
   setIndicators(list: ActiveInd[]) {
+    const keptHeights = this.chart.panes().map((p) => p.getHeight());
     for (const r of this.inds) {
       for (const s of Object.values(r.series)) this.chart.removeSeries(s);
     }
@@ -206,10 +211,8 @@ export class ChartController {
       }
       this.inds.push({ ind, def, series, levels, last: {} });
     }
-    const panes = this.chart.panes();
-    panes.forEach((p, i) => {
-      if (i > 0) p.setHeight(104);
-    });
+    // empty panes vanish with their series, so remember heights: a resized pane stays resized
+    this.applyHeights((n) => keptHeights.slice(1, n).concat(Array(n).fill(104)).slice(0, n - 1));
     this.recomputeIndicators();
   }
 
@@ -224,7 +227,7 @@ export class ChartController {
   private recomputeIndicators() {
     if (!this.bars.length) return;
     for (const r of this.inds) {
-      const out = r.def.calc(this.bars, r.ind.params);
+      const out = r.def.calc(this.bars, r.ind.params, this.context);
       r.def.outputs.forEach((o) => {
         const vals = out[o.key] ?? [];
         const s = r.series[o.key];
@@ -297,7 +300,94 @@ export class ChartController {
     if (i < 0) logical = (t - b[0].t) / ms;
     else if (i === b.length - 1) logical = i + (t - b[i].t) / ms;
     else logical = i + Math.min(0.999, (t - b[i].t) / ms);
-    return this.chart.timeScale().logicalToCoordinate(logical as Logical);
+    return this.logicalX(logical);
+  }
+
+  /**
+   * logicalToCoordinate() returns 0 for fractional indexes, which collapsed every drawing whose
+   * anchor did not sit exactly on a bar open (any drawing viewed on another timeframe). Map the
+   * integer bar and add the fraction by hand.
+   */
+  private logicalX(logical: number): number | null {
+    const ts = this.chart.timeScale();
+    const i = Math.floor(logical);
+    const base = ts.logicalToCoordinate(i as Logical);
+    if (base === null) return null;
+    return base + (logical - i) * ts.options().barSpacing;
+  }
+
+  /**
+   * Magnet: pull a pointer position to the nearest bar open in time and to the nearest
+   * open/high/low/close in price when one is within `reach` pixels. Beyond the last bar there is
+   * nothing to snap to, so the point stays free.
+   */
+  snap(x: number, y: number, reach = 16): { t: number; p: number } | null {
+    const b = this.bars;
+    const l = this.chart.timeScale().coordinateToLogical(x);
+    const free = this.yToPrice(y);
+    if (l === null || free === null || !b.length) return null;
+    const i = Math.round(l);
+    if (i < 0 || i > b.length - 1) {
+      const t = this.xToTime(x);
+      return t === null ? null : { t, p: free };
+    }
+    const bar = b[i];
+    let p: number = free;
+    let best = reach;
+    for (const v of [bar.o, bar.h, bar.l, bar.c]) {
+      const vy = this.priceToY(v);
+      if (vy !== null && Math.abs(vy - y) < best) {
+        best = Math.abs(vy - y);
+        p = v;
+      }
+    }
+    return { t: bar.t, p };
+  }
+
+  /** Pixel box of every pane, top to bottom (the main pane is index 0). */
+  paneRects(): { top: number; height: number }[] {
+    let top = 0;
+    return this.chart.panes().map((p) => {
+      const height = p.getHeight();
+      const r = { top, height };
+      top += height + 1;
+      return r;
+    });
+  }
+
+  /**
+   * Set the indicator panes to the given pixel heights; the main pane takes the rest. Heights go
+   * in as stretch factors: setHeight() calls made one after another fight each other.
+   */
+  private applyHeights(subs: (paneCount: number) => number[]) {
+    const panes = this.chart.panes();
+    const n = panes.length;
+    if (n < 2) return;
+    const h = subs(n);
+    const total = Math.max(200, this.host.clientHeight - (this.chart.timeScale().height() || 26));
+    const subSum = h.reduce((a, b) => a + Math.max(26, b), 0);
+    panes[0].setStretchFactor(Math.max(60, total - subSum));
+    h.forEach((v, i) => panes[i + 1]?.setStretchFactor(Math.max(26, v)));
+  }
+
+  /** Give one indicator pane most of the height, or fold it down to its title row. */
+  isFolded(index: number) {
+    return (this.chart.panes()[index]?.getHeight() ?? 99) <= 34;
+  }
+
+  setPaneMode(index: number, mode: 'normal' | 'collapsed' | 'max' | 'toggle') {
+    if (mode === 'toggle') mode = this.isFolded(index) ? 'normal' : 'collapsed';
+    const FOLD = 26;
+    const heights = this.chart.panes().map((p) => p.getHeight());
+    this.applyHeights((n) => {
+      const subs = heights.slice(1, n);
+      const total = Math.max(200, this.host.clientHeight - 26);
+      return subs.map((v, i) => {
+        const pi = i + 1;
+        if (mode === 'max') return pi === index ? Math.round(total * 0.6) : FOLD;
+        return pi === index ? (mode === 'collapsed' ? FOLD : 104) : v;
+      });
+    });
   }
 
   xToTime(x: number): number | null {
@@ -331,7 +421,7 @@ export class ChartController {
     const last = this.bars[this.bars.length - 1];
     const y1 = last ? this.priceToY(last.c) : 0;
     const y2 = last ? this.priceToY(last.c * 1.001) : 0;
-    return `${ts.logicalToCoordinate(0 as Logical)}|${ts.options().barSpacing}|${y1}|${y2}|${this.mainPaneHeight()}|${this.bars.length}|${this.priceScaleWidth()}`;
+    return `${ts.logicalToCoordinate(0 as Logical)}|${ts.options().barSpacing}|${y1}|${y2}|${this.chart.panes().map((p) => p.getHeight()).join(',')}|${this.bars.length}|${this.priceScaleWidth()}`;
   }
 
   screenshot(): string | null {

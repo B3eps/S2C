@@ -25,6 +25,7 @@ export const CATS: { id: ToolCat; name: string }[] = [
 
 export const TOOLS: ToolDef[] = [
   { kind: 'trend', cat: 'lines', name: 'Trend çizgisi', points: 2 },
+  { kind: 'arrow', cat: 'lines', name: 'Ok', points: 2, desc: 'İkinci noktada ok başı olan çizgi. Beklediğin hareketin yönünü gösterir.' },
   { kind: 'ray', cat: 'lines', name: 'Işın', points: 2, desc: 'İlk noktadan başlar, ikinci noktanın yönünde sağa doğru sonsuza uzar. Bir trendin devamını izlemek için.' },
   { kind: 'extended', cat: 'lines', name: 'Uzatılmış çizgi', points: 2, desc: 'İki noktadan geçip her iki yöne de uzanan çizgi.' },
   { kind: 'hline', cat: 'lines', name: 'Yatay çizgi', points: 1, desc: 'Tek bir seviye: destek, direnç ya da önemli bir dönüş noktası.' },
@@ -63,6 +64,7 @@ export const TOOLS: ToolDef[] = [
     desc: 'Bir hareketin geri çekilebileceği seviyeler: %23,6 · 38,2 · 50 · 61,8 · 78,6. Yükselişte dipten tepeye, düşüşte tepeden dibe sürükle.',
     link: 'https://en.wikipedia.org/wiki/Fibonacci_retracement',
   },
+  { kind: 'text', cat: 'shapes', name: 'Metin notu', points: 1, desc: 'Grafiğe kısa bir not bırakır: bir seviyenin ya da mumun neden önemli olduğunu yaz.' },
   { kind: 'rect', cat: 'shapes', name: 'Dikdörtgen', points: 2, desc: 'Bir bölgeyi işaretler: arz-talep alanı, konsolidasyon ya da açılış aralığı.' },
   {
     kind: 'longpos',

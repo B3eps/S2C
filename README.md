@@ -58,7 +58,9 @@ Hesaplar, işlemler, günlük ve ayarlar **sadece senin bilgisayarında**, taray
 ## Bilmen gerekenler
 
 - **Veri kaynağı:** Mumlar, internet üzerinden Dukascopy'den (XAU/USD alış fiyatı) indirilir ve klasördeki `.cache` içinde saklanır. İnternet bağlantısı gerekir.
-- **Spread ve kayma:** Tek fiyat serisi kullanıldığı için gerçek spread ve kayma yoktur.
+- **Piyasa saatleri:** Altın New York saatini izler: cuma 17:00'de kapanır, pazar 18:00'de açılır. Günlük mumlar da 17:00 New York'ta kesilir.
+- **Spread ve kayma:** Mumlar alış fiyatıdır. Long işlemler satış fiyatından açılır, short işlemler satış fiyatından kapanır; aradaki fark **Ayarlar → Veri kaynağı → Spread** ile belirlenir (varsayılan 0,20 $). Spread sabittir, haber anındaki açılma ve kayma modellenmez.
+- **Parça Setup:** Yalnızca kapanmış mumlarla hesaplanır, sonradan değişmez. Bölgeler 15dk, 1sa ve 4sa mumlardan gelir. Bu mekanik bir yorumdur; kazanç garantisi vermez.
 - **Aynı dakikada SL ve TP:** Simülasyon stopu önce sayar.
 - **BEM programları:** Firmanın 10 Kasım 2026'da yayımlanan şartlarına göre modellendi. Haber kısıtları, sembol başına risk sınırı ve ödeme incelemeleri bütünüyle modellenmez.
   - Kaynaklar: [BEM One](https://bemfunding.com/terms-of-use/bem-one), [BEM One Only](https://bemfunding.com/terms-of-use/bem-one-only), [Classic Normal](https://bemfunding.com/terms-of-use/bem-classic-normal), [Classic Swing](https://bemfunding.com/terms-of-use/bem-classic-swing).

@@ -21,7 +21,9 @@ export function Dashboard() {
   const session = useApp((s) => s.session);
   const sessions = useApp((s) => s.sessions);
   const live = useApp((s) => s.live);
+  const trades = useApp((s) => s.trades);
   const S = useApp.getState;
+  const net = trades.reduce((t, x) => t + x.pnl, 0);
   const [tab, setTab] = useState<Tab>(() => (accounts.some((a) => inTab(a, 'active')) ? 'active' : accounts.some((a) => inTab(a, 'funded')) ? 'funded' : 'active'));
 
   if (!accounts.length) {
@@ -46,12 +48,19 @@ export function Dashboard() {
       <div className="page-head accounts-head">
         <div><h1>Hesaplar</h1><p>Fon hesaplarını ve kurallarını buradan takip et.</p></div>
         <div className="grow" />
+        {trades.length > 0 && (
+          <div className="ledger" aria-label="Toplam">
+            <span>Seans <b>{sessions.length}</b></span>
+            <span>İşlem <b>{trades.length}</b></span>
+            <span>Net <b className={net > 0 ? 'up' : net < 0 ? 'down' : ''}>{money(net)}</b></span>
+          </div>
+        )}
         <button className="btn primary" onClick={() => S().go('new')}>
           <Icon name="plus" size={16} /> Yeni hesap
         </button>
       </div>
       <div className="page-body">
-        <div className="accounts-list-head"><div><h2>Hesaplarım</h2><span>{list.length} hesap</span></div><p>Hesap durumuna göre görüntüle</p></div>
+        <div className="accounts-list-head"><div><h2>Hesaplarım</h2><span>{list.length} hesap</span></div></div>
         <div className="tabs-row accounts-tabs" role="tablist" aria-label="Hesap durumu">
           {TABS.map(([t, label]) => (
             <button key={t} className="tab" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
