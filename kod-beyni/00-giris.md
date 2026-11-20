@@ -17,6 +17,7 @@ Bu kasa kodun **haritasıdır**, kopyası değil. Bir göreve başlarken bu notu
 | Parça Setup / Gold sinyal motorları | [[parca-sinyalleri]] |
 | Bozulmaması gereken kurallar ve tuzaklar | [[degismezler]] |
 | Bilinen sorunlar ve yapılacaklar | [[iyilestirmeler]] |
+| Onay bekleyen özellik fikirleri | [[fikirler]] |
 
 Piyasa, strateji ve deney araştırması bu kasada değil: `../arastirma-hafizasi/pano.md` ile başla (ayrı Obsidian kasası).
 
