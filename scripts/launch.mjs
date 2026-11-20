@@ -52,9 +52,14 @@ try {
   /* nothing listening: start below */
 }
 
-// 2. first run: install dependencies
+// 2. install dependencies on the first run, and again when an update changed them
+// (npm writes node_modules/.package-lock.json after every install)
+const installed = path.join(ROOT, 'node_modules', '.package-lock.json');
 if (!existsSync(path.join(ROOT, 'node_modules'))) {
   say('İlk çalıştırma: bağımlılıklar kuruluyor (bir kez, birkaç dakika sürebilir)…');
+  npm(['ci']);
+} else if (!existsSync(installed) || statSync(path.join(ROOT, 'package-lock.json')).mtimeMs > statSync(installed).mtimeMs) {
+  say('Güncelleme: yeni bağımlılıklar kuruluyor…');
   npm(['ci']);
 }
 
