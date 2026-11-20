@@ -18,6 +18,7 @@ Bu kasa kodun **haritasıdır**, kopyası değil. Bir göreve başlarken bu notu
 | Bozulmaması gereken kurallar ve tuzaklar | [[degismezler]] |
 | Bilinen sorunlar ve yapılacaklar | [[iyilestirmeler]] |
 | Onay bekleyen özellik fikirleri | [[fikirler]] |
+| Yeni enstrümanlar, grafik kararlılığı, animasyon araştırması | [[genisleme-arastirmasi]] |
 
 Piyasa, strateji ve deney araştırması bu kasada değil: `../arastirma-hafizasi/pano.md` ile başla (ayrı Obsidian kasası).
 
