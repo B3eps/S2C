@@ -3,7 +3,10 @@ import type { SeriesMarker, Time } from 'lightweight-charts';
 import { ChartController, LineSpec } from '../lib/chartController';
 import { getFeed, marketBus, fxBus, shooter, useApp, ticketLots, pnlOf, riskOf, markPrice, spreadOf, Fx, LineTarget } from '../store';
 import { TF, TFS, TF_LABEL, TF_MS, Drawing, Anchor, Side, uid } from '../lib/types';
-import { TOOL_BY_KIND, FIB_LEVELS, regression, defaultStop } from '../lib/drawings';
+import { TOOL_BY_KIND, defaultStop } from '../lib/drawings';
+import { drawingShapes, hitShapes, Shape, Handle, SceneEnv } from '../lib/drawingScene';
+import { OverlayPrimitive } from '../lib/overlayPrimitive';
+import type { SetupMark } from '../lib/parcaSetup';
 import { IND_BY_ID, ActiveInd } from '../lib/indicators';
 import { createSetupEngine, SetupResult } from '../lib/parcaSetup';
 import { createGoldSetupEngine } from '../lib/parcaSetupGold';
@@ -35,6 +38,71 @@ interface OLine {
 
 /** last copied drawing, shared between panes (Ctrl+C / Ctrl+V / Ctrl+D) */
 let drawingClip: Drawing | null = null;
+
+type LiveSetup = { id: ParcaId; side: 'long' | 'short'; entry: number; stop: number; target: number; strong: boolean; t: number; rr: number; liqR?: number };
+/** Everything the canvas overlay paints, refreshed on every React render. */
+interface OverlayState {
+  drawings: Drawing[];
+  selected: string | null;
+  signals: { mark: SetupMark; id: ParcaId }[];
+  live: LiveSetup[];
+}
+
+/** Index of the bar opening at `t`, or -1. */
+function barAt(bars: { t: number }[], t: number) {
+  let lo = 0, hi = bars.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (bars[mid].t === t) return mid;
+    if (bars[mid].t < t) lo = mid + 1; else hi = mid - 1;
+  }
+  return -1;
+}
+
+/** Parça signal labels and the price plan of a still-open signal, as canvas shapes. */
+function setupShapes(ctrl: ChartController, s: OverlayState, W: number, H: number): Shape[] {
+  const out: Shape[] = [];
+  const tag = (x: number, y: number, w: number, h: number, fill: string, text: string, stroke?: string, sw?: number) => {
+    out.push({ k: 'box', x, y, w, h, fill, stroke, sw, r: 3 });
+    out.push({ k: 'text', x: x + w / 2, y: y + h / 2 + 4, text, color: C.ply0, size: 11, weight: 800, align: 'center' });
+  };
+  if (H >= 50) for (const { mark, id } of s.signals) {
+    const x = ctrl.timeToX(mark.t);
+    const i = barAt(ctrl.bars, mark.t);
+    if (x == null || i < 0 || x < 0 || x > W) continue;
+    const bar = ctrl.bars[i];
+    const long = mark.side === 'long';
+    const tone = long ? C.up : C.down;
+    const barY = ctrl.priceToY(long ? bar.l : bar.h);
+    if (barY == null) continue;
+    const pct = mark.prob !== undefined ? ` %${Math.round(mark.prob * 100)}` : '';
+    const w = (mark.strong ? 110 : 94) + (pct ? 30 : 0) + (id === 'parca-setup-gold-a' ? 18 : 0) + (id === 'parca-trained-1m' ? 38 : 0);
+    const left = Math.max(2, Math.min(x - w / 2, W - w - 2));
+    const gold = isGoldId(id);
+    const top = Math.max(3, Math.min(barY + (long ? (gold ? 48 : 22) : gold ? -69 : -43), H - 24));
+    out.push({ k: 'line', x1: x, y1: long ? barY + 5 : barY - 5, x2: x, y2: long ? top : top + 22, color: tone, width: 1.5 });
+    tag(left, top, w, 22, tone, `${parcaName(id)} ${long ? '↑ AL' : '↓ SAT'}${mark.strong ? ' ★' : ''}${pct}`, gold ? C.goldStrong : C.ply0, gold ? 2 : 1.5);
+  }
+  for (const live of s.live) {
+    const x0 = ctrl.timeToX(live.t);
+    const ye = ctrl.priceToY(live.entry), ys = ctrl.priceToY(live.stop), yt = ctrl.priceToY(live.target);
+    if (x0 == null || ye == null || ys == null || yt == null) continue;
+    const x1 = Math.max(0, Math.min(x0, W - 60));
+    const gold = isGoldId(live.id);
+    // the presets stack their tags side by side, each 200 px wide
+    const slotN = live.id === 'parca-trained-1m' ? 3 : live.id === 'parca-setup-gold-a' ? 2 : gold ? 1 : 0;
+    const tagX = Math.max(2, W - 204 * (slotN + 1));
+    const row = (priceY: number, name: string, color: string, dash: boolean) => {
+      out.push({ k: 'line', x1, y1: priceY, x2: W, y2: priceY, color, width: name === 'GİRİŞ' ? 1.5 : 1, dash });
+      const y = Math.max(11, Math.min(H - 11, priceY));
+      tag(tagX, y - 9, 200, 18, color, `${parcaName(live.id)} ${name}`);
+    };
+    row(ye, 'GİRİŞ', gold ? C.goldStrong : live.side === 'long' ? C.up : C.down, false);
+    row(ys, 'STOP', C.down, true);
+    row(yt, 'HEDEF', C.up, true);
+  }
+  return out;
+}
 const sideWord =(s: Side) => (s === 'long' ? 'Long' : 'Short');
 const typeWord = { market: 'Piyasa', limit: 'Limit', stop: 'Stop' } as const;
 
@@ -182,11 +250,35 @@ export function ChartPanel({ index }: { index: number }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ d: Drawing; stage: 'b' | 'c' } | null>(null);
   const lines = useLines();
+  const overlayRef = useRef<OverlayPrimitive | null>(null);
+  const overlayState = useRef<OverlayState>({ drawings: [], selected: null, signals: [], live: [] });
+  /** order tag elements and their prices: moved by the overlay's paint, in step with the candles */
+  const tagEls = useRef(new Map<string, { el: HTMLDivElement; price: number }>());
 
   // create chart
   useEffect(() => {
     const ctrl = new ChartController(hostRef.current!, tf);
     ctrlRef.current = ctrl;
+    const overlay = new OverlayPrimitive(
+      (W, H) => {
+        const s = overlayState.current;
+        const env: SceneEnv = { X: (t) => ctrl.timeToX(t), Y: (p) => ctrl.priceToY(p), W, H, bars: ctrl.bars, tfMs: TF_MS[ctrl.tf] };
+        const out = setupShapes(ctrl, s, W, H);
+        for (const d of s.drawings) out.push(...drawingShapes(d, env, s.selected === d.id));
+        return out;
+      },
+      () => {
+        const H = ctrl.mainPaneHeight();
+        for (const { el, price } of tagEls.current.values()) {
+          const y = ctrl.priceToY(price);
+          const hide = y == null || y < -10 || y > H + 10;
+          el.style.visibility = hide ? 'hidden' : '';
+          if (!hide) el.style.transform = `translateY(${y}px)`;
+        }
+      },
+    );
+    ctrl.candles.attachPrimitive(overlay);
+    overlayRef.current = overlay;
     let lastVals = 0;
     ctrl.onIndicatorValues = (v) => {
       const now = performance.now();
@@ -233,6 +325,8 @@ export function ChartPanel({ index }: { index: number }) {
       ctrl.chart.timeScale().unsubscribeVisibleLogicalRangeChange(refresh);
       cancelAnimationFrame(raf);
       if (primary && shooter.fn) shooter.fn = null;
+      ctrl.candles.detachPrimitive(overlay);
+      overlayRef.current = null;
       ctrl.destroy();
       ctrlRef.current = null;
     };
@@ -510,19 +604,43 @@ export function ChartPanel({ index }: { index: number }) {
     return () => window.removeEventListener('keydown', esc);
   }, []);
 
-  const dragHandle = (d: Drawing, which: 'a' | 'b' | 'c' | 'both') => (e: React.PointerEvent) => {
-    if (tool !== 'cursor') return;
+  // ── drawings live on the chart canvas: find what the pointer is over by geometry ──
+  const hitDrawing = (e: { clientX: number; clientY: number }): { d: Drawing; which: 'body' | Handle } | null => {
+    const c = ctrlRef.current;
+    if (!c) return null;
+    const { x, y } = localXY(e);
+    const W = Math.max(0, (hostRef.current?.clientWidth ?? 0) - c.priceScaleWidth());
+    const H = c.mainPaneHeight();
+    if (x < 0 || y < 0 || x > W || y > H) return null;
+    const env: SceneEnv = { X: (t) => c.timeToX(t), Y: (p) => c.priceToY(p), W, H, bars: c.bars, tfMs: TF_MS[tf] };
+    const list = useApp.getState().session?.drawings ?? [];
+    // the last drawn sits on top
+    for (let i = list.length - 1; i >= 0; i--) {
+      const which = hitShapes(drawingShapes(list[i], env, list[i].id === selected), x, y);
+      if (which) return { d: list[i], which };
+    }
+    return null;
+  };
+
+  const onHostDownCapture = (e: React.PointerEvent) => {
+    if (tool !== 'cursor' || e.button !== 0) return;
+    if ((e.target as HTMLElement).closest('.oline, .dtool, .pane-bar')) return;
+    const hit = hitDrawing(e);
+    if (!hit) return;
+    // keep the chart from panning: the drawing takes this pointer
     e.stopPropagation();
     e.preventDefault();
+    setMenu(null);
+    const { d, which } = hit;
     setSelected(d.id);
     if (d.locked) return;
-    const el = e.currentTarget as Element;
+    const el = e.currentTarget as HTMLElement;
     el.setPointerCapture(e.pointerId);
     const start = toAnchor(e, false);
     const move = (ev: PointerEvent) => {
-      const p = toAnchor(ev, which !== 'both');
+      const p = toAnchor(ev, which !== 'body');
       if (!p || !start) return;
-      if (which === 'both') {
+      if (which === 'body') {
         const dt = p.t - start.t;
         const dp = p.p - start.p;
         const sh = (x: Anchor) => ({ t: x.t + dt, p: x.p + dp });
@@ -530,11 +648,23 @@ export function ChartPanel({ index }: { index: number }) {
       } else S().updateDrawing({ ...d, [which]: p });
     };
     const up = () => {
-      el.removeEventListener('pointermove', move as EventListener);
+      el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      el.classList.remove('drag-drawing');
     };
-    el.addEventListener('pointermove', move as EventListener);
+    el.classList.add('drag-drawing');
+    el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  };
+
+  /** pointer feedback over a drawing; the chart's own cursor shows everywhere else */
+  const onHostHover = (e: React.PointerEvent) => {
+    const el = e.currentTarget as HTMLElement;
+    const over = tool === 'cursor' && !e.buttons && !(e.target as HTMLElement).closest('.oline, .dtool, .pane-bar') ? hitDrawing(e) : null;
+    el.classList.toggle('on-drawing', !!over && over.which === 'body');
+    el.classList.toggle('on-handle', !!over && over.which !== 'body');
   };
 
   const onContext = (e: React.MouseEvent) => {
@@ -555,7 +685,7 @@ export function ChartPanel({ index }: { index: number }) {
     .map((mark) => ({ mark, id: ind.id as ParcaId })))
     .sort((a, b) => a.mark.t - b.mark.t).slice(-32) : [];
   // Setup signals show their price plan only; they never create or size an order.
-  const liveSetups: { id: ParcaId; side: 'long' | 'short'; entry: number; stop: number; target: number; strong: boolean; t: number; rr: number; liqR?: number }[] = [];
+  const liveSetups: LiveSetup[] = [];
   if (ctrl) for (const ind of setupInds) {
     const sig = [...(setups[ind.uid]?.marks ?? [])].reverse().find((x) => x.kind === 'signal' && x.entry !== undefined);
     if (!sig) continue;
@@ -571,224 +701,9 @@ export function ChartPanel({ index }: { index: number }) {
   }
   void ver;
 
-  const renderDrawing = (d: Drawing) => {
-    if (!ctrl) return null;
-    const W = plotW;
-    const X = (t: number) => ctrl.timeToX(t);
-    const Y = (p: number) => ctrl.priceToY(p);
-    const ax = X(d.a.t);
-    const ay = Y(d.a.p);
-    const bx = X(d.b.t);
-    const by = Y(d.b.p);
-    if (ax == null || ay == null || bx == null || by == null) return null;
-    const sel = selected === d.id;
-    const cls = `dline ${sel ? 'sel' : ''}`;
-    const body = dragHandle(d, 'both');
-    const H = (which: 'a' | 'b' | 'c', x: number, y: number) =>
-      sel ? <rect key={which} x={x - 4} y={y - 4} width={8} height={8} className="dhandle" onPointerDown={dragHandle(d, which)} /> : null;
-    /** a line through two points, cut at the plot edges */
-    const ext = (x1: number, y1: number, x2: number, y2: number, mode: 'right' | 'both' | 'dir') => {
-      const dx = x2 - x1;
-      if (Math.abs(dx) < 1e-6) return { x1, y1: 0, x2, y2: paneH };
-      const k = (y2 - y1) / dx;
-      const at = (x: number) => y1 + k * (x - x1);
-      if (mode === 'both') return { x1: 0, y1: at(0), x2: W, y2: at(W) };
-      if (mode === 'right') return { x1, y1, x2: W, y2: at(W) };
-      const edge = dx > 0 ? W : 0;
-      return { x1, y1, x2: edge, y2: at(edge) };
-    };
-    const Line = (l: { x1: number; y1: number; x2: number; y2: number }, key: string, extra = '') => (
-      <g key={key}>
-        <line {...l} className="dhit" onPointerDown={body} />
-        <line {...l} className={`${cls} ${extra}`} style={{ pointerEvents: 'none', ...(d.color ? { stroke: d.color } : {}), ...(d.width ? { strokeWidth: d.width } : {}) }} />
-      </g>
-    );
-    const Label = (x: number, y: number, text: string, key: string, anchor: 'start' | 'end' | 'middle' = 'start', tone = '') => (
-      <text key={key} x={x} y={y} className={`dlabel ${tone}`} textAnchor={anchor}>
-        {text}
-      </text>
-    );
-    const tfMs = TF_MS[tf];
-    const pctTxt = (from: number, to: number) => {
-      const v = ((to - from) / from) * 100;
-      return `${v >= 0 ? '+' : '−'}%${Math.abs(v).toFixed(2).replace('.', ',')}`;
-    };
-
-    switch (d.kind) {
-      case 'trend':
-        return <g key={d.id}>{Line({ x1: ax, y1: ay, x2: bx, y2: by }, 'l')}{H('a', ax, ay)}{H('b', bx, by)}</g>;
-      case 'arrow': {
-        const len = Math.hypot(bx - ax, by - ay) || 1;
-        const ux = (bx - ax) / len;
-        const uy = (by - ay) / len;
-        const hs = 9 + (d.width ?? 1) * 1.5;
-        const p1 = `${bx - ux * hs - uy * hs * 0.5},${by - uy * hs + ux * hs * 0.5}`;
-        const p2 = `${bx - ux * hs + uy * hs * 0.5},${by - uy * hs - ux * hs * 0.5}`;
-        return (
-          <g key={d.id}>
-            {Line({ x1: ax, y1: ay, x2: bx - ux * 2, y2: by - uy * 2 }, 'l')}
-            <polygon points={`${bx},${by} ${p1} ${p2}`} className="darrow" style={{ pointerEvents: 'none', fill: d.color ?? (sel ? 'var(--ink-1)' : 'var(--ink-2)') }} />
-            {H('a', ax, ay)}
-            {H('b', bx, by)}
-          </g>
-        );
-      }
-      case 'ray':
-        return <g key={d.id}>{Line(ext(ax, ay, bx, by, 'dir'), 'l')}{H('a', ax, ay)}{H('b', bx, by)}</g>;
-      case 'extended':
-        return <g key={d.id}>{Line(ext(ax, ay, bx, by, 'both'), 'l')}{H('a', ax, ay)}{H('b', bx, by)}</g>;
-      case 'text':
-        return (
-          <g key={d.id}>
-            <text x={ax + 6} y={ay - 6} className="dtext" style={d.color ? { fill: d.color } : undefined} onPointerDown={body}>
-              {d.text || 'Not'}
-            </text>
-            <circle cx={ax} cy={ay} r={3} className="dpin" style={d.color ? { fill: d.color } : undefined} />
-            {H('a', ax, ay)}
-          </g>
-        );
-      case 'hline':
-        return <g key={d.id}>{Line({ x1: 0, y1: ay, x2: W, y2: ay }, 'l')}{H('a', Math.min(Math.max(ax, 8), W - 8), ay)}</g>;
-      case 'hray':
-        return <g key={d.id}>{Line({ x1: ax, y1: ay, x2: W, y2: ay }, 'l')}{H('a', ax, ay)}</g>;
-      case 'vline':
-        return <g key={d.id}>{Line({ x1: ax, y1: 0, x2: ax, y2: paneH }, 'l')}{H('a', ax, ay)}</g>;
-      case 'cross':
-        return (
-          <g key={d.id}>
-            {Line({ x1: 0, y1: ay, x2: W, y2: ay }, 'h')}
-            {Line({ x1: ax, y1: 0, x2: ax, y2: paneH }, 'v')}
-            {H('a', ax, ay)}
-          </g>
-        );
-      case 'rect':
-        return (
-          <g key={d.id}>
-            <rect x={Math.min(ax, bx)} y={Math.min(ay, by)} width={Math.abs(bx - ax)} height={Math.abs(by - ay)} className={`drect ${sel ? 'sel' : ''}`} onPointerDown={body} />
-            {H('a', ax, ay)}
-            {H('b', bx, by)}
-          </g>
-        );
-      case 'channel': {
-        const main = { x1: ax, y1: ay, x2: bx, y2: by };
-        if (!d.c) return <g key={d.id}>{Line(main, 'l')}</g>;
-        const cx = X(d.c.t) ?? bx;
-        const cy = Y(d.c.p) ?? by;
-        const k = bx === ax ? 0 : (by - ay) / (bx - ax);
-        const off = cy - (ay + k * (cx - ax));
-        const par = { x1: ax, y1: ay + off, x2: bx, y2: by + off };
-        return (
-          <g key={d.id}>
-            <polygon points={`${ax},${ay} ${bx},${by} ${bx},${by + off} ${ax},${ay + off}`} className="dfill" onPointerDown={body} />
-            {Line(main, 'm')}
-            {Line(par, 'p')}
-            {Line({ x1: ax, y1: ay + off / 2, x2: bx, y2: by + off / 2 }, 'mid', 'dashed')}
-            {H('a', ax, ay)}
-            {H('b', bx, by)}
-            {H('c', cx, cy)}
-          </g>
-        );
-      }
-      case 'regression': {
-        const r = regression(ctrl.bars, d.a.t, d.b.t);
-        if (!r) return <g key={d.id}>{Line({ x1: ax, y1: ay, x2: bx, y2: by }, 'l', 'dashed')}</g>;
-        const x1 = X(r.t1) ?? ax;
-        const x2 = X(r.t2) ?? bx;
-        const yy = (t: number, k: number) => Y(r.at(t) + k * r.sd) ?? 0;
-        const up = { x1, y1: yy(r.t1, 2), x2, y2: yy(r.t2, 2) };
-        const lo = { x1, y1: yy(r.t1, -2), x2, y2: yy(r.t2, -2) };
-        return (
-          <g key={d.id}>
-            <polygon points={`${up.x1},${up.y1} ${up.x2},${up.y2} ${lo.x2},${lo.y2} ${lo.x1},${lo.y1}`} className="dfill" onPointerDown={body} />
-            {Line({ x1, y1: yy(r.t1, 0), x2, y2: yy(r.t2, 0) }, 'c')}
-            {Line(up, 'u', 'dashed')}
-            {Line(lo, 'd', 'dashed')}
-            {H('a', x1, yy(r.t1, 0))}
-            {H('b', x2, yy(r.t2, 0))}
-          </g>
-        );
-      }
-      case 'pitchfork': {
-        if (!d.c) return <g key={d.id}>{Line({ x1: ax, y1: ay, x2: bx, y2: by }, 'l', 'dashed')}</g>;
-        const cx = X(d.c.t) ?? bx;
-        const cy = Y(d.c.p) ?? by;
-        const mx = (bx + cx) / 2;
-        const my = (by + cy) / 2;
-        const med = ext(ax, ay, mx, my, 'dir');
-        const k = mx === ax ? 0 : (my - ay) / (mx - ax);
-        const fwd = (x: number, y: number) => {
-          const edge = mx >= ax ? W : 0;
-          return { x1: x, y1: y, x2: edge, y2: y + k * (edge - x) };
-        };
-        return (
-          <g key={d.id}>
-            {Line(med, 'm')}
-            {Line(fwd(bx, by), 'u')}
-            {Line(fwd(cx, cy), 'd')}
-            {Line({ x1: bx, y1: by, x2: cx, y2: cy }, 'bc', 'dashed')}
-            {H('a', ax, ay)}
-            {H('b', bx, by)}
-            {H('c', cx, cy)}
-          </g>
-        );
-      }
-      case 'fib': {
-        const x1 = Math.min(ax, bx);
-        const lv = FIB_LEVELS.map((L) => ({ L, y: Y(d.b.p + (d.a.p - d.b.p) * L) ?? 0 }));
-        return (
-          <g key={d.id}>
-            {lv.slice(1).map((l, i) => (
-              <rect key={`f${i}`} x={x1} y={Math.min(l.y, lv[i].y)} width={W - x1} height={Math.abs(l.y - lv[i].y)} className={`dfib f${i % 2}`} onPointerDown={body} />
-            ))}
-            {lv.map((l) => (
-              <g key={l.L}>
-                {Line({ x1, y1: l.y, x2: W, y2: l.y }, `l${l.L}`, l.L === 0.5 || l.L === 0.618 ? 'strong' : '')}
-                {Label(x1 + 4, l.y - 4, l.L.toFixed(3).replace('.', ','), `t${l.L}`)}
-              </g>
-            ))}
-            {Line({ x1: ax, y1: ay, x2: bx, y2: by }, 'diag', 'dashed')}
-            {H('a', ax, ay)}
-            {H('b', bx, by)}
-          </g>
-        );
-      }
-      case 'longpos':
-      case 'shortpos': {
-        const stop = d.c?.p ?? defaultStop(d.a.p, d.b.p);
-        const sy = Y(stop) ?? ay;
-        const x1 = Math.min(ax, bx);
-        const x2 = Math.max(Math.max(ax, bx), x1 + 120);
-        const rr = Math.abs(d.b.p - d.a.p) / Math.max(1e-9, Math.abs(stop - d.a.p));
-        return (
-          <g key={d.id}>
-            <rect x={x1} y={Math.min(ay, by)} width={x2 - x1} height={Math.abs(by - ay)} className="dpos win" onPointerDown={body} />
-            <rect x={x1} y={Math.min(ay, sy)} width={x2 - x1} height={Math.abs(sy - ay)} className="dpos loss" onPointerDown={body} />
-            <line x1={x1} x2={x2} y1={ay} y2={ay} className="dline" style={{ pointerEvents: 'none' }} />
-            {Label(x1 + 6, by + (by < ay ? 14 : -6), `Hedef ${pctTxt(d.a.p, d.b.p)}`, 'tt', 'start', 'up')}
-            {Label(x1 + 6, sy + (sy > ay ? -6 : 14), `Stop ${pctTxt(d.a.p, stop)}`, 'st', 'start', 'down')}
-            {Label(x1 + 6, ay + (by < ay ? 14 : -6), `R:R 1 : ${rr.toFixed(2).replace('.', ',')}`, 'rr')}
-            {H('a', x1, ay)}
-            {H('b', x2, by)}
-            {H('c', x2, sy)}
-          </g>
-        );
-      }
-      case 'measure': {
-        const up = d.b.p >= d.a.p;
-        const n = Math.round(Math.abs(d.b.t - d.a.t) / tfMs);
-        return (
-          <g key={d.id}>
-            <rect x={Math.min(ax, bx)} y={Math.min(ay, by)} width={Math.abs(bx - ax)} height={Math.abs(by - ay)} className={`dpos ${up ? 'win' : 'loss'}`} onPointerDown={body} />
-            <line x1={ax} y1={ay} x2={bx} y2={by} className="dline dashed" style={{ pointerEvents: 'none' }} />
-            {Label((ax + bx) / 2, Math.min(ay, by) - 6, `${pctTxt(d.a.p, d.b.p)} · ${n} mum`, 'm', 'middle', up ? 'up' : 'down')}
-            {H('a', ax, ay)}
-            {H('b', bx, by)}
-          </g>
-        );
-      }
-    }
-    return null;
-  };
+  // the canvas overlay reads this on its next paint
+  overlayState.current = { drawings, selected, signals: visibleSignals, live: liveSetups };
+  useEffect(() => { overlayRef.current?.update(); });
 
   const maxPane = useApp((s) => s.maxPane);
   const multi = prefs.count > 1;
@@ -863,6 +778,8 @@ export function ChartPanel({ index }: { index: number }) {
       <div
         className="chart-host"
         onContextMenu={onContext}
+        onPointerDownCapture={onHostDownCapture}
+        onPointerMove={onHostHover}
         onPointerDown={() => {
           setMenu(null);
           if (tool === 'cursor') setSelected(null);
@@ -870,74 +787,6 @@ export function ChartPanel({ index }: { index: number }) {
       >
         <div ref={hostRef} className="chart-canvas" />
         <div className="chart-overlay">
-          <svg>
-            <defs>
-              <clipPath id={`clip-${slot}`}>
-                <rect x={0} y={0} width={plotW} height={paneH} />
-              </clipPath>
-            </defs>
-            <g clipPath={`url(#clip-${slot})`} style={{ pointerEvents: 'none' }}>
-              {visibleSignals.map(({ mark, id }) => {
-                const x = ctrl?.timeToX(mark.t);
-                const bar = ctrl?.bars.find((item) => item.t === mark.t);
-                if (x == null || !bar || x < 0 || x > plotW || paneH < 50) return null;
-                const long = mark.side === 'long';
-                const tone = long ? C.up : C.down;
-                const barY = ctrl?.priceToY(long ? bar.l : bar.h);
-                if (barY == null) return null;
-                const pct = mark.prob !== undefined ? ` %${Math.round(mark.prob * 100)}` : '';
-                const w = (mark.strong ? 110 : 94) + (pct ? 30 : 0) + (id === 'parca-setup-gold-a' ? 18 : 0) + (id === 'parca-trained-1m' ? 38 : 0);
-                const left = Math.max(2, Math.min(x - w / 2, plotW - w - 2));
-                const gold = isGoldId(id);
-                const labelOffset = long ? (gold ? 48 : 22) : (gold ? -69 : -43);
-                const top = Math.max(3, Math.min(barY + labelOffset, paneH - 24));
-                return (
-                  <g key={`${id}-${mark.t}-${mark.side}`}>
-                    <line x1={x} x2={x} y1={long ? barY + 5 : barY - 5} y2={long ? top : top + 22} stroke={tone} strokeWidth={1.5} />
-                    <rect x={left} y={top} width={w} height={22} rx={3} fill={tone} stroke={gold ? C.goldStrong : C.ply0} strokeWidth={gold ? 2 : 1.5} />
-                    <text x={left + w / 2} y={top + 15} textAnchor="middle" style={{ fill: C.ply0, fontSize: 11, fontWeight: 800 }}>
-                      {parcaName(id)} {long ? '↑ AL' : '↓ SAT'}{mark.strong ? ' ★' : ''}{pct}
-                    </text>
-                  </g>
-                );
-              })}
-            </g>
-            <g clipPath={`url(#clip-${slot})`} style={{ pointerEvents: 'none' }}>
-              {liveSetups.map((live) => {
-                if (!ctrl) return null;
-                const x0 = ctrl.timeToX(live.t);
-                const ye = ctrl.priceToY(live.entry), ys = ctrl.priceToY(live.stop), yt = ctrl.priceToY(live.target);
-                if (x0 == null || ye == null || ys == null || yt == null) return null;
-                const x1 = Math.max(0, Math.min(x0, plotW - 60));
-                const gold = isGoldId(live.id);
-                const tone = gold ? C.goldStrong : live.side === 'long' ? C.up : C.down;
-                // the three presets stack their tags side by side, each 200 px wide
-                const slotN = live.id === 'parca-trained-1m' ? 3 : live.id === 'parca-setup-gold-a' ? 2 : gold ? 1 : 0;
-                const tagX = Math.max(2, plotW - 204 * (slotN + 1));
-                const rightLine = (priceY: number, name: string, color: string, dash: string, offset = 0) => {
-                  const y = Math.max(11, Math.min(paneH - 11, priceY));
-                  const yy = Math.max(11, Math.min(paneH - 11, y + offset));
-                  return <g key={name}>
-                    <line x1={x1} x2={plotW} y1={priceY} y2={priceY} stroke={color} strokeWidth={name === 'GİRİŞ' ? 1.5 : 1} strokeDasharray={dash} />
-                    <rect x={tagX} y={yy - 9} width={200} height={18} rx={3} fill={color} />
-                    <text x={tagX + 100} y={yy + 4} textAnchor="middle" style={{ fill: C.ply0, fontSize: 11, fontWeight: 800 }}>
-                      {parcaName(live.id)} {name}
-                    </text>
-                  </g>;
-                };
-                return (
-                  <g key={live.id}>
-                    {rightLine(ye, 'GİRİŞ', tone, 'none')}
-                    {rightLine(ys, 'STOP', C.down, '5 3')}
-                    {rightLine(yt, 'HEDEF', C.up, '5 3')}
-                  </g>
-                );
-              })}
-            </g>
-            <g clipPath={`url(#clip-${slot})`} style={{ pointerEvents: tool === 'cursor' ? undefined : 'none' }}>
-              {drawings.map(renderDrawing)}
-            </g>
-          </svg>
           {(() => {
             const d = session?.drawings.find((x) => x.id === selected);
             if (!d || !ctrl || tool !== 'cursor') return null;
@@ -1018,9 +867,17 @@ export function ChartPanel({ index }: { index: number }) {
           {ctrl &&
             lines.map((l) => {
               const y = ctrl.priceToY(l.price);
-              if (y == null || y < -10 || y > paneH + 10) return null;
+              const hide = y == null || y < -10 || y > paneH + 10;
               return (
-                <div key={l.key} className={`oline ${l.cls}`} style={{ transform: `translateY(${y}px)`, right: scaleW }}>
+                <div
+                  key={l.key}
+                  className={`oline ${l.cls}`}
+                  style={{ transform: `translateY(${y ?? 0}px)`, visibility: hide ? 'hidden' : undefined, right: scaleW }}
+                  ref={(el) => {
+                    if (el) tagEls.current.set(l.key, { el, price: l.price });
+                    else tagEls.current.delete(l.key);
+                  }}
+                >
                   {l.draggable && <div className="hit" onPointerDown={startDrag(l)} />}
                   <div
                     className={`tag ${editLine && editLine.id === l.target.id && l.target.kind !== 'ticket' ? 'sel' : ''}`}

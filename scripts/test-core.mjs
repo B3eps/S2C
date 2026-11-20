@@ -435,3 +435,16 @@ test('gerçekleşen hedef trailing tabanı yükseltince kalan pozisyon aynı fiy
   assert.deepEqual(result.events.map(event => event.reason), ['tp', 'violation']);
   near(result.events[1].price, 108.2);
 });
+
+const scene = await load('src/lib/drawingScene.ts');
+const env = { X: (t) => t, Y: (p) => 200 - p, W: 400, H: 200, bars: [], tfMs: 60000 };
+test('yatay çizgi kendi yüksekliğinden tutulur, uzağından tutulmaz', () => {
+  const shapes = scene.drawingShapes({ id: 'h', kind: 'hline', a: { t: 50, p: 100 }, b: { t: 50, p: 100 } }, env, false);
+  assert.equal(scene.hitShapes(shapes, 300, 103), 'body');
+  assert.equal(scene.hitShapes(shapes, 300, 120), null);
+});
+test('seçili çizimde tutamaç gövdeden önce gelir', () => {
+  const d = { id: 't', kind: 'trend', a: { t: 10, p: 100 }, b: { t: 200, p: 150 } };
+  assert.equal(scene.hitShapes(scene.drawingShapes(d, env, true), 11, 101), 'a');
+  assert.equal(scene.hitShapes(scene.drawingShapes(d, env, false), 11, 101), 'body');
+});

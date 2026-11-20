@@ -2543,3 +2543,11 @@ input[type='date']:placeholder-shown {
 .stats-none { display: grid; justify-items: start; gap: var(--s-3); padding: var(--s-8) 0 var(--s-6); max-width: 56ch; border-top: 1px solid var(--rule); }
 .stats-none h2 { font-size: var(--t-22); }
 .stats-none p { color: var(--ink-2); }
+
+/* drawings are painted on the chart canvas; the host shows the pointer feedback */
+.chart-host.on-drawing .chart-canvas,
+.chart-host.on-drawing .chart-canvas * { cursor: pointer !important; }
+.chart-host.on-handle .chart-canvas,
+.chart-host.on-handle .chart-canvas * { cursor: grab !important; }
+.chart-host.drag-drawing,
+.chart-host.drag-drawing * { cursor: grabbing !important; }
