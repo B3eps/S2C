@@ -179,6 +179,8 @@ interface State {
   startSession(accountId: string, instrument?: InstrumentId): Promise<void>;
   endSession(reason?: Notice['reason']): Promise<void>;
   advanceToDayEnd(): Promise<void>;
+  /** process every minute up to `target` (replay ms), forward only, with all orders and rules */
+  advanceTo(target: number): Promise<void>;
   advanceToNextSignal(): Promise<void>;
   stopSignalSeek(): void;
   stepBar(): void;
@@ -992,6 +994,34 @@ export const useApp = create<State>((set, get) => {
         get().showToast('Prop günü tamamlandı; günlük limit yeni güne göre yenilendi.');
       else if (get().session?.id === initial.id && get().session!.dayKey === dayKey && feed?.exhausted)
         get().showToast('Gün sonuna ulaşmak için daha fazla piyasa verisi gerekiyor.', 'warn');
+    },
+
+    async advanceTo(target) {
+      const initial = get().session;
+      if (!initial || !feed || get().playing || get().seekingSignal || get().dataWait || target <= feed.clock) return;
+      let revealed = 0;
+      set({ dataWait: true });
+      // a week of minutes at most: the strip never asks for more than one prop day
+      for (let i = 0; i < 7 * 24 * 60 && feed && feed.clock < target; i++) {
+        const current = get().session;
+        if (!current || current.id !== initial.id) break;
+        const bar = feed.step();
+        if (!bar) {
+          if (feed.loadError) { get().showToast('İlerlenemedi; piyasa verisi yüklenemedi.', 'warn'); break; }
+          if (feed.isLoading) { await feed.waitForLoading(); continue; }
+          if (feed.exhausted) { get().showToast('Bu ana kadar yetecek tarihsel mum kalmadı.', 'warn'); break; }
+          continue;
+        }
+        revealed++;
+        if (!processMinute()) break;
+        if (revealed >= 64) {
+          afterSteps(revealed);
+          revealed = 0;
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
+      if (revealed && get().session?.id === initial.id) afterSteps(revealed);
+      set({ dataWait: false });
     },
 
     async advanceToNextSignal() {

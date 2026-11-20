@@ -15,7 +15,9 @@ Gerçek altın grafiği geçmişten rastgele bir anda açılır. Fiyat ve tarih 
   - Kripto hafta sonu da işlem görür. Altın ve endeksler Cuma 17:00 – Pazar 18:00 (New York) kapalıdır.
   - Kaldıraç ve komisyon programın kurallarından gelir (FTM: altın 10x, BTC/ETH 8x, kripto komisyonu %0,03). Program sınır yayımlamamışsa varsayılanlar: altın 15x, kripto 2x, endeks 20x.
 - **Grafik**
-  - Kör replay: gerçek Dukascopy XAU/USD mumları, fiyat ve tarih gizli.
+  - Kör replay: gerçek Dukascopy mumları, fiyat ve tarih gizli.
+  - Gün şeridi: prop gününü (22:00 → 22:00 UTC) seans bantları, haberler ve işlemlerinle gösterir. İleride bir ana tıklayınca oraya kadar her mum, emir ve kural sırayla işlenir; geri sarma yoktur. Habere tıklamak bir dakika öncesinde durdurur.
+  - Çizimler grafiğin kendi tuvaline çizilir: kaydırma ve yakınlaştırmada mumlarla aynı karede hareket eder, ekran görüntülerinde de görünür.
   - Gizli fiyat tek tıkla açılabilir.
   - 1–8 grafik bölmesi, 5 zaman dilimi.
   - Eksenleri sürükleyerek yakınlaştırma.
@@ -61,7 +63,7 @@ Hesaplar, işlemler, günlük ve ayarlar **sadece senin bilgisayarında**, taray
 
 ## Bilmen gerekenler
 
-- **Veri kaynağı:** Mumlar, internet üzerinden Dukascopy'den (XAU/USD alış fiyatı) indirilir ve klasördeki `.cache` içinde saklanır. İnternet bağlantısı gerekir.
+- **Veri kaynağı:** Mumlar, internet üzerinden Dukascopy'den (alış fiyatı) indirilir ve klasördeki `.cache` içinde saklanır. İnternet bağlantısı gerekir.
 - **Piyasa saatleri:** Altın New York saatini izler: cuma 17:00'de kapanır, pazar 18:00'de açılır. Günlük mumlar da 17:00 New York'ta kesilir.
 - **Spread ve kayma:** Mumlar alış fiyatıdır. Long işlemler satış fiyatından açılır, short işlemler satış fiyatından kapanır; aradaki fark **Ayarlar → Veri kaynağı → Spread** ile belirlenir (varsayılan 0,20 $). Spread sabittir, haber anındaki açılma ve kayma modellenmez.
 - **Parça Klasik ve Parça Gold:** İki sürüm aynı grafikte ayrı ayrı hesaplanır. Gold sürümünün likidite filtresi, aynı işlem gününde sweep **veya** son 2 saatte 1H/4H bölgesine temas ister. Diğer Gold koşulları (bias, engulf, MSP, seans ve FVG eşiği) korunur. FVG, iFVG, OB, engulf, MSP, sweep ve bias arkada hesaplanır; grafikte yalnızca sürüm adıyla AL/SAT sinyali ve 1R TP çizgisi görünür. Oynatma sinyal mumunun kapanışında durur; işlemi sen açarsın. 1 dakikalık grafikte oynatma en çok saniyede 4 mumdur. **Sinyale ilerle** düğmesi kayıtlı mumları sırayla işleyerek sonraki sinyalde durur. Bu mekanik bir yorumdur; sinyal aralığı veya kazanç garantisi vermez.

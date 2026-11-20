@@ -18,6 +18,9 @@ Satır sayıları Kasım 2026 çalışma kopyası. Bir dosyayı açmadan önce b
 | `types.ts` | Tüm tipler (`Bar`, `Order`, `Position`, `Trade`, `Rules`, `Account`, `SessionRec`, `Drawing`), `CONTRACT=100`, `MIN_LOT=0.01`, `uid`. |
 | `feed.ts` | `Feed` replay akışı, `/api/candles` çağrısı ve veri doğrulama, `randomStart`. |
 | `market.ts` | ABD yaz saati (`usDst`), piyasa kapalı mı (`isClosed`, New York 17:00 Cuma → 18:00 Pazar), günlük mumlar. |
+| `instruments.ts` | Enstrüman kaydı (XAUUSD, BTCUSD, ETHUSD, US500, US100): sözleşme, spread, sınıf; `leverageFor`, `commissionFor`, `instrumentOf` (eski kayıtlar altın). |
+| `drawingScene.ts` | Çizimlerin saf geometrisi: aynı şekiller hem tuvale çizilir (`paintShapes`) hem tıklama tespitinde kullanılır (`hitShapes`). |
+| `overlayPrimitive.ts` | Lightweight Charts series primitive: çizimleri ve Parça etiketlerini grafiğin kendi boyamasında çizer; `afterPaint` SL/TP etiketlerini aynı karede taşır. |
 | `execution.ts` | Dolum ve çıkış kuralları, spread, risk lotu, kaldıraç sınırı, mum içi yol simülasyonu. → [[islem-motoru]] |
 | `accountRules.ts` | Günlük/toplam zarar tabanı, hedef, ödeme eşiği, sayılan günler. |
 | `programs.ts` | BEM ve FTM programları (fiyat, indirim, kurallar), `propDay` (22:00 UTC gün sınırı), `payoutNet`, `splitFor`. |
@@ -34,7 +37,7 @@ Satır sayıları Kasım 2026 çalışma kopyası. Bir dosyayı açmadan önce b
 | `format.ts` | Para, %, R, lot, tarih biçimleri (Türkçe). |
 
 ## `src/components/`
-`ChartPanel.tsx` (~1150, grafik bölmesi, sürüklenebilir emir/SL/TP etiketleri, çizimler), `ToolRail.tsx` (çizim araç çubuğu), `IndicatorPicker.tsx`, `TradeChart.tsx` (günlükteki işlem grafiği), `bits.tsx` (CertLabel, Gauge, EquityCurve, Heatmap, CountUp), `PerformanceCalendar.tsx`, `Icon.tsx` (elle çizilmiş ikonlar), `Emblem.tsx`.
+`ChartPanel.tsx` (~1000, grafik bölmesi, SL/TP etiketleri, çizim etkileşimi; çizimlerin kendisi `overlayPrimitive` ile tuvalde), `ToolRail.tsx` (çizim araç çubuğu), `ReplayStrip.tsx` (prop günü şeridi, yalnız ileri: `advanceTo`), `IndicatorPicker.tsx`, `TradeChart.tsx` (günlükteki işlem grafiği), `bits.tsx` (CertLabel, Gauge, EquityCurve, Heatmap, CountUp), `PerformanceCalendar.tsx`, `Icon.tsx` (elle çizilmiş ikonlar), `Emblem.tsx`.
 
 ## `src/views/`
 `Trade.tsx` (~730, işlem ekranı), `Dashboard`, `NewAccount`, `Journal`, `Stats`, `Settings` (ayarlar, yedekleme), `Replay` (işlem tekrarı), `Overlays` (büyük anlar ve bildirimler).

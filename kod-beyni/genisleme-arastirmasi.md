@@ -4,7 +4,7 @@ tags: [s2c, fikir, arastirma]
 
 # Genişleme araştırması (20 Kasım 2026)
 
-Kullanıcının istediği üç iş: yeni enstrümanlar, daha kararlı grafik ve çizimler, animasyonlu arayüz. Henüz hiçbiri onaylı değil; sıra ve kapsam konuşulacak. Kullanıcı ilkesi: her konuda kökenine kadar araştır, ücretsiz kaynakları dene, özgün özellik yaz ve çiz.
+Kullanıcının istediği üç iş: yeni enstrümanlar, daha kararlı grafik ve çizimler, animasyonlu arayüz. **Durum (20 Kasım 2026):** çizimler tuvale taşındı, beş enstrüman eklendi, gün şeridi eklendi. Animasyon kütüphanesi henüz eklenmedi. Kullanıcı ilkesi: her konuda kökenine kadar araştır, ücretsiz kaynakları dene, özgün özellik yaz ve çiz.
 
 ## 1. Yeni enstrümanlar
 **Denendi:** `dukascopy-node` ile 10 ve 14 Kasım 2026 için 1dk mum indirildi.

@@ -16,10 +16,13 @@ Kodda görünmeyen ama bozulursa ürünü bozan kurallar. Bir değişiklik bunla
 ## Kör replay
 - Oyun sırasında **fiyat ve tarih görünmez**: fiyat ekseni, imleç etiketi gizli; seviyeler R, % ve $ olarak okunur. Kullanıcı tek tıkla fiyatı açabilir (`showPrice`).
 - Gelecek mum sızamaz: `base0` sonrası her şey 1dk mumlardan kurulur. Yeni bir veri yolu eklerken bu kuralı koru.
-- Hafta sonu mumları gizlenir (`market.ts` `isClosed`, New York saatine göre).
+- Hafta sonu mumları altın ve endekslerde gizlenir (`market.ts` `isClosed`, New York saatine göre); kripto 7/24 açıktır.
+- Gün şeridi yalnız ileri gider (`advanceTo`); geri sarma eklemek kör replay'i bozar.
 
 ## Teknik tuzaklar
 - **Port 5199 sabit:** tarayıcı verisi bu kökene bağlı; değiştirmek kullanıcının tüm kayıtlarını "kaybettirir".
+- **Çizimler tuvalde:** grafiğe yeni bir görsel katman eklenecekse SVG/HTML değil `drawingScene.ts` şekli olarak ekle; React üstü katman grafiğin bir kare gerisinde kalır. Tıklama tespiti aynı şekillerden yapılır.
+- **Enstrüman seansa bağlı:** sözleşme, spread, kaldıraç ve komisyon `store.ts`teki `inst` üzerinden gelir; yeni hesaplamada `CONTRACT` sabitini doğrudan kullanma. `instrument` alanı olmayan eski kayıt altındır.
 - `src/lib/theme.ts` ↔ `src/styles/tokens.css` renkleri elle eş tutulur.
 - Altın rengi (`--gold`) yalnız amblem, sertifika etiketi ve ekranın tek ana eylemi için. Pozitif veri `--up` rengindedir.
 - Animasyonlar yalnız `transform`/`opacity`; `prefers-reduced-motion` hepsini kapatır.

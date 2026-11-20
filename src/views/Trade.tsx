@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { splitFor } from '../lib/programs';
 import { commissionFor } from '../lib/instruments';
+import { ReplayStrip } from '../components/ReplayStrip';
 import { activeInstrument, useApp, SPEEDS, ticketLots, riskOf, pnlOf, markPrice, spreadOf, accountLimits, countedDays, passBlocker, payoutBlocker, consistencyScore } from '../store';
 import { isParcaId } from '../lib/parcaVariants';
 import { ChartPanel } from '../components/ChartPanel';
@@ -604,6 +605,7 @@ function Dock() {
           </button>
         </div>
       </div>
+      <div className="strip-row"><ReplayStrip /></div>
       <div className="dock-body">
         {tab === 'pos' &&
           (session.positions.length ? (
