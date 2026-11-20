@@ -7,9 +7,10 @@ tags: [s2c, kod, yapilacaklar]
 20 Kasım 2026 incelemesi. Önem sırasıyla. Çözülen maddeyi sil.
 
 ## 1. Acil: kaybolma riski
-- **Kaydedilmemiş büyük iş.** `parca-setup-ve-veri-duzeltmeleri` dalında 18 dosyada ~1200 satır değişiklik ve 20'den fazla yeni script, `arastirma-hafizasi/`, `.claude/skills/`, `AGENTS.md` hiç commit'lenmemiş. Disk arızası ya da yanlış bir `git checkout` hepsini siler. Commit'le, GitHub'a gönder.
+- **Dal GitHub'da yok.** `parca-setup-ve-veri-duzeltmeleri` dalındaki iş 20 Kasım 2026'da commit'lendi (`f6c5a16`), ama dal hiç `origin`'e gönderilmedi; yalnız bu diskte duruyor. `git push -u origin parca-setup-ve-veri-duzeltmeleri`.
 - **`main` geride.** Asıl kod Parça dalında; `main` iki adım eski. İş oturunca birleştir.
-- **`analysis/` (36 MB) ve `.cache/` (350 MB) git'e girmemeli.** `.cache` zaten dışarıda; `analysis/` için `.gitignore` satırı ekle, yalnız özet raporları tut.
+- **`analysis/` ham verisi (`.json`, `.jsonl`, `.log`, `.csv`, ~35 MB) git dışında ama `.gitignore`'da da değil.** Yalnız `.md` raporlar commit'lendi. Ham dosyalar için `.gitignore` satırı ekle; bunların yedeği yalnız bu disk.
+- `arastirma-hafizasi/.obsidian/workspace.json` her Obsidian açılışında değişir; `.gitignore`'a ekle.
 
 ## 2. Kullanıcı verisinin güvenliği
 - **Kalıcı depolama istenmiyor.** `navigator.storage.persist()` çağrısı yok; disk dolunca tarayıcı IndexedDB'yi silebilir. Açılışta bir kez iste.
@@ -31,4 +32,4 @@ tags: [s2c, kod, yapilacaklar]
 ## 5. Test ve CI
 - Çekirdek testler iyi (46 test, hepsi geçiyor). Eksik: `store.ts` akışları (ihlal anı, funded geçişi, ödeme engelleri, gün değişimi). Bunları saf fonksiyonlara çıkarıp `test-core.mjs`'e ekle.
 - CI tarayıcı testini (`test:browser`) çalıştırmıyor; GitHub Actions'ta Chrome var, eklenebilir.
-- CI her itmede çalışır ama kaydedilmemiş iş CI'ya hiç ulaşmıyor (madde 1).
+- CI her itmede çalışır ama dal gönderilmediği için Parça işi CI'ya hiç ulaşmadı (madde 1).
