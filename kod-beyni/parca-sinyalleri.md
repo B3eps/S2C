@@ -19,5 +19,5 @@ Grafikte indikatör olarak eklenen, otomatik AL/SAT işaretleri üreten kurallar
 - Model katsayıları **elle düzenlenmez**: `parcaModel.ts` → `scripts/fit-gold-model.mjs`, `parcaModel1m.ts` → `scripts/train-1m-filter.mjs` ile yeniden üretilir.
 - Oynatma sinyal mumunun kapanışında durur; işlemi kullanıcı açar (otomatik işlem yok).
 
-## Bilinen kusur
-`parcaModel1m.ts` içinde `source.includes('5dk')`, `'15dk'` metninde de doğru döner; 15dk sinyalleri 5dk özelliğini de açar. Bkz. [[iyilestirmeler]].
+## Düzeltilen kusur (20 Kasım 2026)
+`parcaModel1m.ts` eskiden `source.includes('5dk')` kullanıyordu; `'15dk'` metninde de doğru döndüğü için 15dk sinyalleri 5dk ağırlığını alıyordu. Artık eğitimdeki gibi `startsWith('5dk ')` ve düzeltilmiş eğitimin katsayıları (`train-1m-corrected.mjs`) kullanılıyor; eşik 0,45. Model hâlâ deneysel, küçük örneklem.

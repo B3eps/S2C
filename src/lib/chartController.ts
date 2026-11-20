@@ -7,7 +7,7 @@ import { ActiveInd, IND_BY_ID, IndContext, IndDef } from './indicators';
 import { Bar, TF, TF_MS } from './types';
 import { marketSession } from './calendar';
 import { clockUtc } from './format';
-import type { PaneView } from '../store';
+import type { PaneView } from './prefs';
 
 const sec = (ms: number) => (ms / 1000) as UTCTimestamp;
 

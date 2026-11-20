@@ -71,6 +71,11 @@ export function NewAccount() {
               BTC/ETH kaldıracı <b>{rules.cryptoLeverage}x</b>
             </span>
           ) : null}
+          {rules.indexLeverage ? (
+            <span>
+              Endeks kaldıracı <b>{rules.indexLeverage}x</b>
+            </span>
+          ) : null}
           {rules.commissionPct ? (
             <span>
               Komisyon <b>{pctTr(rules.commissionPct)}</b> / yön

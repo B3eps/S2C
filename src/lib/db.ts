@@ -65,11 +65,15 @@ export const store = {
   async putSetup(s: SetupRecord) {
     await (await db()).put('setups', s);
   },
+  /** a screenshot as a data URL; stored as a Blob (older records are data URL text) */
   async shot(id: string): Promise<string | undefined> {
-    return (await db()).get('shots', id);
+    const v: Blob | string | undefined = await (await db()).get('shots', id);
+    return v instanceof Blob ? blobToDataUrl(v) : v;
   },
   async putShot(id: string, dataUrl: string) {
-    await (await db()).put('shots', dataUrl, id);
+    // binary WebP is a quarter smaller than its base64 text and never has to be one long string
+    const blob = await dataUrlToBlob(dataUrl);
+    await (await db()).put('shots', blob, id);
   },
   async kv<T>(key: string): Promise<T | undefined> {
     return (await db()).get('kv', key);
@@ -81,18 +85,66 @@ export const store = {
 
 const STORES = ['accounts', 'trades', 'sessions', 'shots', 'kv', 'setups'] as const;
 
+const dataUrlToBlob = async (url: string) => (await fetch(url)).blob();
+const blobToDataUrl = (b: Blob) =>
+  new Promise<string>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result as string);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(b);
+  });
+
+/** Ask the browser not to evict S2C's storage when the disk runs low. Best effort: some browsers decide alone. */
+export async function requestPersistence() {
+  try {
+    if (navigator.storage?.persist && !(await navigator.storage.persisted())) await navigator.storage.persist();
+  } catch {
+    /* not supported: storage stays best-effort */
+  }
+}
+
+/**
+ * The backup is the same JSON as always, written as many small parts (one per screenshot), so
+ * hundreds of trades never become one giant string in memory. Records the time for the reminder.
+ */
 export async function exportBackup(): Promise<Blob> {
   const d = await db();
-  const out: Record<string, unknown> = { app: 's2c', version: 2, exportedAt: Date.now() };
   const tx = d.transaction([...STORES], 'readonly');
+  const rows: Record<string, unknown[]> = {};
   for (const s of STORES) {
     if (s === 'shots' || s === 'kv') {
       const keys = await tx.objectStore(s).getAllKeys();
       const vals = await tx.objectStore(s).getAll();
-      out[s] = keys.map((k, i) => [k, vals[i]]);
-    } else out[s] = await tx.objectStore(s).getAll();
+      rows[s] = keys.map((k, i) => [k, vals[i]]);
+    } else rows[s] = await tx.objectStore(s).getAll();
   }
-  return new Blob([JSON.stringify(out)], { type: 'application/json' });
+  await tx.done;
+  const parts: BlobPart[] = [`{"app":"s2c","version":2,"exportedAt":${Date.now()}`];
+  for (const s of STORES) {
+    parts.push(`,"${s}":[`);
+    for (let i = 0; i < rows[s].length; i++) {
+      let row = rows[s][i];
+      if (s === 'shots') {
+        const [k, v] = row as [string, Blob | string];
+        row = [k, v instanceof Blob ? await blobToDataUrl(v) : v];
+      }
+      parts.push((i ? ',' : '') + JSON.stringify(row));
+    }
+    parts.push(']');
+  }
+  parts.push('}');
+  await store.putKv('lastBackupAt', Date.now());
+  return new Blob(parts, { type: 'application/json' });
+}
+
+/** Build the backup and hand it to the browser as a download. */
+export async function downloadBackup() {
+  const blob = await exportBackup();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `s2c-yedek-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 export async function inspectBackup(file: File) {
@@ -149,12 +201,13 @@ export async function inspectBackup(file: File) {
     sessionIds.add(s.id);
   }
   const owners = new Map(data.sessions.map((s: SessionRec) => [s.id, s.accountId]));
+  const sessionById = new Map<string, SessionRec>(data.sessions.map((s: SessionRec) => [s.id, s]));
   const instrumentOk = (v: unknown) => v === undefined || isInstrumentId(v);
   if (!data.sessions.every((s: SessionRec) => instrumentOk(s.instrument)) || !data.trades.every((t: Trade) => instrumentOk(t.instrument))) throw new Error('Yedekte tanınmayan enstrüman var.');
   const tradeIds = new Set<string>();
   for (const t of data.trades) {
     if (tradeIds.has(t.id) || !setupIds.has(t.setupId) || !ids.has(t.accountId) || !sessionIds.has(t.sessionId) || !number(t.pnl) || !number(t.realClosedAt) || !number(t.entry) || !number(t.exit) || !number(t.lots) || t.lots <= 0 || !['long', 'short'].includes(t.side)) throw new Error('Yedekte geçersiz işlem var.');
-    const session = data.sessions.find((s: SessionRec) => s.id === t.sessionId);
+    const session = sessionById.get(t.sessionId);
     if (owners.get(t.sessionId) !== t.accountId || accountSetups.get(t.accountId) !== t.setupId || session?.setupId !== t.setupId || !number(t.openedAt) || !number(t.closedAt) || t.closedAt < t.openedAt ||
         !['1m','5m','15m','1h','4h'].includes(t.tf)) throw new Error('İşlem ile seans bilgileri uyuşmuyor.');
     tradeIds.add(t.id);
@@ -164,6 +217,8 @@ export async function inspectBackup(file: File) {
 
 export async function importBackup(file: File) {
   const data = await inspectBackup(file);
+  // decode screenshots first: an IndexedDB transaction closes while it waits on anything else
+  data.shots = await Promise.all(data.shots.map(async ([k, v]: [string, string]) => [k, typeof v === 'string' && v.startsWith('data:') ? await dataUrlToBlob(v) : v]));
   const d = await db();
   const tx = d.transaction(STORES as unknown as string[], 'readwrite');
   for (const s of STORES) {

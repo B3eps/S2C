@@ -13,7 +13,7 @@ Gerçek altın grafiği geçmişten rastgele bir anda açılır. Fiyat ve tarih 
 - **Enstrümanlar:** Altın (XAUUSD), Bitcoin (BTCUSD), Ethereum (ETHUSD), S&P 500 (US500) ve Nasdaq 100 (US100). Enstrüman her seansın başında hesap kartından seçilir.
   - 1 lot: 100 ons altın, 1 BTC, 1 ETH, endekslerde puan başına 1 $.
   - Kripto hafta sonu da işlem görür. Altın ve endeksler Cuma 17:00 – Pazar 18:00 (New York) kapalıdır.
-  - Kaldıraç ve komisyon programın kurallarından gelir (FTM: altın 10x, BTC/ETH 8x, kripto komisyonu %0,03). Program sınır yayımlamamışsa varsayılanlar: altın 15x, kripto 2x, endeks 20x.
+  - Kaldıraç ve komisyon programın kurallarından gelir. FTM: altın 10x, BTC/ETH 8x, endeks 20x, kripto komisyonu %0,03. BEM tek aşama: BTC/ETH 2x, endeks 15x; iki aşama: BTC/ETH 5x, endeks 50x. Endeks ve BEM kripto değerleri firmaların kendi sitelerinden değil, inceleme sitelerinden alındı. Bunlardan önce açılmış hesaplarda ve özel hesaplarda varsayılanlar geçerli: altın 15x, kripto 2x, endeks 20x.
 - **Grafik**
   - Kör replay: gerçek Dukascopy mumları, fiyat ve tarih gizli.
   - Gün şeridi: prop gününü (22:00 → 22:00 UTC) seans bantları, haberler ve işlemlerinle gösterir. İleride bir ana tıklayınca oraya kadar her mum, emir ve kural sırayla işlenir; geri sarma yoktur. Habere tıklamak bir dakika öncesinde durdurur.
@@ -60,7 +60,7 @@ Hesaplar, işlemler, günlük ve ayarlar **sadece senin bilgisayarında**, taray
 - **Adres:** Veriler `http://localhost:5199` adresine bağlıdır. Başlatıcı bu yüzden hep aynı portu kullanır. Başka bir adresten açarsan uygulama boş görünür.
 - **Tarayıcı:** Başka bir tarayıcıda açarsan veriler oraya taşınmaz.
 - **Silinme:** Tarayıcı verilerini (çerezler ve site verileri) temizlersen kayıtlar silinir.
-- **Yedek:** **Ayarlar → Yedekleme → Yedeği indir** ile düzenli olarak yedek al. Yedekten geri yüklemek ve başka bir bilgisayara taşımak da aynı yerden yapılır.
+- **Yedek:** **Ayarlar → Yedekleme → Yedeği indir** ile düzenli olarak yedek al. Son yedek 7 günden eskiyse panel seni uyarır ve oradan da tek tıkla indirebilirsin. Uygulama tarayıcıdan verileri kalıcı tutmasını da ister; izni tarayıcı verir. Yedekten geri yüklemek ve başka bir bilgisayara taşımak da aynı yerden yapılır.
 
 ## Bilmen gerekenler
 

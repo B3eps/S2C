@@ -1,5 +1,6 @@
 import { Bar, TF, TFS, TF_MS } from './types';
 import { DayBar, dailyBars, isClosed, usDst } from './market';
+import { aggregate } from './candles';
 import { INSTRUMENT_BY_ID, InstrumentId, tradesAllWeek } from './instruments';
 
 /** Closed minutes of an instrument: crypto never closes. */
@@ -10,20 +11,6 @@ const DAY = 86_400_000;
 
 export { isClosed };
 
-function aggregate(bars: Bar[], ms: number): Bar[] {
-  const out: Bar[] = [];
-  for (const b of bars) {
-    const t = Math.floor(b.t / ms) * ms;
-    const last = out[out.length - 1];
-    if (last && last.t === t) {
-      last.h = Math.max(last.h, b.h);
-      last.l = Math.min(last.l, b.l);
-      last.c = b.c;
-      last.v += b.v;
-    } else out.push({ ...b, t });
-  }
-  return out;
-}
 
 /**
  * Real XAU/USD candles (Dukascopy) served by the local endpoint in vite.config.ts.
@@ -110,6 +97,9 @@ export function randomStart(inst: InstrumentId = 'xauusd'): number {
 }
 
 const HIST = 420;
+/** raw 1-minute bars kept behind the cursor: trimmed past TRIM_AT down to KEEP */
+const TRIM_AT = 20_000;
+const KEEP = 1_440;
 
 /**
  * Replay feed. History for each timeframe is fetched natively and ends strictly before
@@ -229,6 +219,12 @@ export class Feed {
     this.ci++;
     const m = this.minutes[this.ci];
     this.push(m);
+    // revealed raw minutes live on in the aggregated bars; past two weeks, drop all but the last day
+    if (this.ci > TRIM_AT) {
+      const drop = this.ci - KEEP;
+      this.minutes.splice(0, drop);
+      this.ci -= drop;
+    }
     return m;
   }
 

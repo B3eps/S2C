@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { useApp } from '../store';
 import { DEFAULT_SPREAD } from '../lib/execution';
 import { INSTRUMENTS } from '../lib/instruments';
-import { exportBackup, importBackup, inspectBackup } from '../lib/db';
+import { downloadBackup, importBackup, inspectBackup } from '../lib/db';
 import { DEFAULT_RULES, Rules } from '../lib/types';
 import { play } from '../lib/sound';
 import { Icon } from '../components/Icon';
@@ -34,12 +34,7 @@ export function Settings() {
   const fileRef = useRef<HTMLInputElement>(null);
   const dirty = JSON.stringify(rules) !== JSON.stringify(settings.rules);
   const doExport = async () => {
-    const blob = await exportBackup();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `s2c-yedek-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    await downloadBackup();
     setMsg('Yedek dosyası indirildi.');
   };
   const doImport = async (f: File) => {

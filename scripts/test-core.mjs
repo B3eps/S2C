@@ -464,3 +464,14 @@ test('FTM kripto kaldıracı ve komisyonu altından ayrıdır, eski kayıtlar al
   assert.equal(instruments.commissionFor(ftm, xauusd), 0.005);
   assert.equal(instruments.instrumentOf({}).id, 'xauusd');
 });
+
+const model1m = await load('src/lib/parcaModel1m.ts');
+test('1dk modelinde 15dk kaynağı 5dk ağırlığını almaz', () => {
+  const t = Date.UTC(2025, 0, 7, 14);
+  const s5 = model1m.trained1mScore('5dk FVG', false, 'long', t);
+  const s15 = model1m.trained1mScore('15dk FVG', false, 'long', t);
+  const base = model1m.trained1mScore('FVG', false, 'long', t);
+  assert.ok(s5 < base && s15 > s5);
+  // 15dk ağırlığı küçük ve negatif: taban skora çok yakın kalır
+  assert.ok(Math.abs(s15 - base) < 0.01);
+});

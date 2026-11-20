@@ -57,9 +57,20 @@ const ftm = {
   maxType: 'static' as const,
   minDays: 0,
   goldLeverage: 10,
+  // ftmperps.com leverage table: BTC/ETH 8x; crypto commission 0.03%
   cryptoLeverage: 8,
   cryptoCommissionPct: 0.03,
+  // indices 20:1: a third-party FTM review (thegodfunded.com), the firm's own page shows none
+  indexLeverage: 20,
 };
+
+/**
+ * BEM crypto and index leverage, from PropFirmMatch's BEM listing (Nov 2026); BEM publishes no
+ * table of its own. 1-step: BTC/ETH 1:2, indices 1:15. 2-step: BTC/ETH 1:5, indices 1:50.
+ * Crypto commission is left at the metals rate: listings disagree (0.025% vs 0.05%).
+ */
+const bemOneStep = { cryptoLeverage: 2, indexLeverage: 15 };
+const bemTwoStep = { cryptoLeverage: 5, indexLeverage: 50 };
 
 export const PROGRAMS: Program[] = [
   {
@@ -69,6 +80,7 @@ export const PROGRAMS: Program[] = [
     prices: { 5000: 39, 10000: 99, 25000: 211, 50000: 321, 100000: 519 },
     rules: {
       ...base,
+      ...bemTwoStep,
       target: 9,
       targets: [9, 4.5],
       dailyLoss: 4.5,
@@ -87,6 +99,7 @@ export const PROGRAMS: Program[] = [
     prices: { 5000: 69, 10000: 155, 25000: 296, 50000: 447, 100000: 890 },
     rules: {
       ...base,
+      ...bemTwoStep,
       target: 9,
       targets: [9, 4.5],
       dailyLoss: 4.5,
@@ -106,6 +119,7 @@ export const PROGRAMS: Program[] = [
     prices: { 5000: 47, 10000: 89, 25000: 194, 50000: 285, 100000: 520, 200000: 790 },
     rules: {
       ...base,
+      ...bemOneStep,
       target: 9,
       targets: [9],
       dailyLoss: 3,
@@ -125,6 +139,7 @@ export const PROGRAMS: Program[] = [
     prices: { 5000: 40, 10000: 90, 25000: 180, 50000: 270, 100000: 460, 200000: 750 },
     rules: {
       ...base,
+      ...bemOneStep,
       target: 6,
       targets: [6],
       dailyLoss: 3,

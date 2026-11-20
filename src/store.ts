@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { Feed, randomStart } from './lib/feed';
 import { INSTRUMENT_BY_ID, Instrument, InstrumentId, commissionFor, instrumentOf, leverageFor } from './lib/instruments';
-import { store as db } from './lib/db';
+import { store as db, requestPersistence } from './lib/db';
 import { play, configureSound } from './lib/sound';
 import { atr } from './lib/indicators';
 import { createSetupEngine } from './lib/parcaSetup';
@@ -12,8 +12,12 @@ import type { ParcaId } from './lib/parcaVariants';
 import { money0 } from './lib/format';
 import { PROGRAMS, payoutNet, propDay, salePrice, splitFor } from './lib/programs';
 import { DEFAULT_SPREAD, availableLots, conservativeCandle, entryPrice, equityAt, markPrice, maxLotsFor, riskLots, tradePnl } from './lib/execution';
-import { accountLimits, countedDays, maximumLossFloor } from './lib/accountRules';
-export { accountLimits, countedDays } from './lib/accountRules';
+import { accountLimits, consistencyScore, countedDays, maximumLossFloor, passBlocker, payoutBlocker } from './lib/accountRules';
+export { accountLimits, countedDays, consistencyScore, payoutBlocker, passBlocker } from './lib/accountRules';
+import { DEFAULT_PREFS, migratePrefs, mainTf, SPEEDS } from './lib/prefs';
+import type { ChartPrefs, PaneCfg } from './lib/prefs';
+export { SPEEDS, LAYOUTS, mainTf } from './lib/prefs';
+export type { ChartPrefs, PaneCfg, PaneView } from './lib/prefs';
 import type { ActiveInd } from './lib/indicators';
 import {
   Account, CONTRACT, CloseReason, DEFAULT_RULES, Drawing, DrawingKind, MIN_LOT, Order, OrderType, Position, Rules,
@@ -98,59 +102,6 @@ export interface Notice {
   reason: 'user' | 'violation' | 'funded' | 'step' | 'data';
 }
 
-export interface ChartPrefs {
-  parcaSetupInitialized?: boolean;
-  parcaGoldInitialized?: boolean;
-  parcaGoldTuned?: boolean;
-  parcaGoldAInitialized?: boolean;
-  /** how many chart panes are shown (1, 2, 3, 4, 6, 8) */
-  count: number;
-  panes: PaneCfg[];
-  speed: number;
-  speedScaleVersion?: 2;
-  /** drawings snap to candle time and OHLC (hold Alt to place freely) */
-  magnet?: boolean;
-  /** bottom dock: height in px, and whether it is folded to its replay bar */
-  dockH?: number;
-  dockOpen?: boolean;
-  /** how 2+ panes share the space: side by side, stacked, or one large pane beside the rest */
-  arrange?: 'cols' | 'rows' | 'focus';
-  /** the crosshair of one pane shows the same moment on the others */
-  syncCrosshair?: boolean;
-  /** right order panel */
-  orderOpen?: boolean;
-  orderW?: number;
-}
-
-export interface PaneView {
-  /** rising candles drawn as outlines */
-  hollow?: boolean;
-  /** Asia / London / New York background bands (default on) */
-  bands?: boolean;
-  /** grid lines (default on) */
-  grid?: boolean;
-  /** logarithmic price scale */
-  log?: boolean;
-  /** keep the newest candle in view as the replay advances (default on) */
-  follow?: boolean;
-}
-
-export const SPEEDS = [0.5, 1, 2, 4, 8, 16, 32];
-export const LAYOUTS = [1, 2, 3, 4, 6, 8];
-
-export interface PaneCfg {
-  tf: TF;
-  ind: ActiveInd[];
-  /** look of this pane; every field defaults to the app's standard */
-  view?: PaneView;
-}
-const PANE_TFS: TF[] = ['5m', '1h', '15m', '4h', '1m', '5m', '15m', '1h'];
-const parcaIndicator = (): ActiveInd => ({ uid: uid(), id: PARCA_CLASSIC_ID, params: { pivot: 2, window: 10, zoneAge: 80 }, colors: ['#c9a96e'] });
-const parcaGoldIndicator = (): ActiveInd => ({ uid: uid(), id: PARCA_GOLD_ID, params: { ...GOLD_SETUP_DEFAULTS }, colors: ['#e8c46e'] });
-const parcaGoldAIndicator = (): ActiveInd => ({ uid: uid(), id: PARCA_GOLD_A_ID, params: { ...GOLD_A_SETUP_DEFAULTS }, colors: ['#f2d58a'] });
-const defaultPanes = (): PaneCfg[] => PANE_TFS.map((tf, i) => ({ tf, ind: i === 0 ? [parcaIndicator(), parcaGoldIndicator(), parcaGoldAIndicator()] : [] }));
-/** The first pane drives replay steps and trade records. */
-export const mainTf = (p: ChartPrefs) => p.panes[0].tf;
 
 interface Live {
   price: number;
@@ -274,43 +225,6 @@ export function deriveType(side: Side, entry: number, bid: number, spread = 0): 
   return (side === 'long' ? entry < quote : entry > quote) ? 'limit' : 'stop';
 }
 
-/** Best day as a % of total realised profit (the firm's consistency score). */
-export function consistencyScore(a: Account) {
-  const days = Object.values(a.dayPnl ?? {});
-  const total = days.reduce((x, y) => x + y, 0);
-  if (total <= 0) return 0;
-  return (Math.max(...days) / total) * 100;
-}
-
-/** Why a payout cannot be requested now, or null. */
-export function payoutBlocker(a: Account, openPositions: number): string | null {
-  if (a.phase !== 'funded' || a.status !== 'active') return null;
-  const lim = accountLimits(a, null);
-  if (openPositions) return 'Ödeme için açık pozisyon olmamalı.';
-  if (a.balance < lim.payoutAt) return `Ödeme için bakiye en az ${money0(lim.payoutAt)} olmalı.`;
-  const need = a.rules.payoutMinDays ?? 0;
-  const have = new Set(a.payoutDays ?? []).size;
-  if (have < need) return `Ödeme için ${need - have} işlem günü daha gerekli.`;
-  const cap = a.rules.payoutConsistencyPct;
-  if (cap && consistencyScore(a) > cap) return `Tutarlılık: en iyi gün toplam kârın %${consistencyScore(a).toFixed(0)}’i (sınır %${cap}).`;
-  return null;
-}
-
-/** Why a reached target has not passed yet, or null when it can pass now. */
-export function passBlocker(a: Account, openPositions: number): string | null {
-  const lim = accountLimits(a, null);
-  if (a.phase !== 'challenge' || a.status !== 'active' || a.balance < lim.target) return null;
-  const days = countedDays(a);
-  if (days < a.rules.minDays) {
-    const left = a.rules.minDays - days;
-    return a.rules.minDayPct ? `Hedef tamam · ${left} kârlı gün daha (günde en az %${String(a.rules.minDayPct).replace('.', ',')})` : `Hedef tamam · ${left} işlem günü daha`;
-  }
-  if (openPositions) return 'Hedef tamam · açık pozisyonları kapat';
-  const cap = a.rules.consistencyPct;
-  if (cap && consistencyScore(a) > cap) return `Hedef tamam · tutarlılık: en iyi gün kârın %${consistencyScore(a).toFixed(0)}’i (sınır %${cap})`;
-  return null;
-}
-
 /**
  * Session writes: user actions save at once; replay steps save at most once a second, and the
  * latest state is always flushed (on pause, on leaving the page). Closed trades are written
@@ -349,58 +263,6 @@ const accountNo = (existing: Account[]) => {
   const n = existing.reduce((m, a) => Math.max(m, parseInt(a.no.replace(/^S2C-/, ''), 10) || 0), 0);
   return `S2C-${n + 1}`;
 };
-
-const DEFAULT_PREFS: ChartPrefs = {
-  parcaSetupInitialized: true,
-  parcaGoldInitialized: true,
-  parcaGoldTuned: true,
-  parcaGoldAInitialized: true,
-  count: 1,
-  panes: defaultPanes(),
-  speed: 1,
-  speedScaleVersion: 2,
-  magnet: true,
-  dockH: 232,
-  dockOpen: true,
-  orderOpen: true,
-};
-
-function migratePrefs(raw: unknown): ChartPrefs {
-  const p = (raw ?? {}) as Partial<ChartPrefs> & { layout?: string; tfA?: TF; tfB?: TF; indA?: ActiveInd[]; indB?: ActiveInd[] };
-  const speed = p.speedScaleVersion === 2 ? p.speed ?? 1 : p.speed === undefined ? 1 : Math.min(SPEEDS.length - 1, p.speed + 1);
-  if (p.panes && p.panes.length === 8) {
-    const panes = p.panes.map((pane, i) => {
-      const ind = pane.ind.map((item) => {
-        const v = item.params;
-        // Gold settings saved before the engulf entry existed: move to the current preset.
-        if (item.id === PARCA_GOLD_ID && (v.entry === undefined || v.ema === undefined || v.adx === undefined || v.minP === undefined || v.room === undefined)) return { ...item, params: { ...GOLD_SETUP_DEFAULTS } };
-        if (!p.parcaGoldTuned && item.id === PARCA_GOLD_ID && v.pivot === 3 && v.window === 6 &&
-          v.zoneAge === 60 && v.minGap === 0.45 && v.biasMode === 2 && v.sweep === 1 && v.session === 1)
-          return { ...item, params: { ...v, sweep: 2 } };
-        // Migrate only the previous untouched preset; keep deliberate user settings.
-        if (item.id !== 'parca-setup' || v.pivot !== 2 || v.window !== 8 || v.zoneAge !== 80 ||
-          (v.minGap !== undefined && v.minGap !== 0.3) ||
-          (v.biasMode !== undefined && v.biasMode !== 2) ||
-          (v.sweep !== undefined && v.sweep !== 0) ||
-          (v.session !== undefined && v.session !== 1)) return item;
-        return { ...item, params: { ...v, window: 10, minGap: 0.25 } };
-      });
-      if (i === 0 && !p.parcaSetupInitialized && !ind.some((item) => item.id === PARCA_CLASSIC_ID)) ind.push(parcaIndicator());
-      if (i === 0 && !p.parcaGoldInitialized && !p.panes!.some((other) => other.ind.some((item) => item.id === PARCA_GOLD_ID))) ind.push(parcaGoldIndicator());
-      if (i === 0) for (let k = 0; k < ind.length; k++) if (ind[k].id === PARCA_GOLD_A_ID && (ind[k].params.minP === undefined || ind[k].params.room === undefined)) ind[k] = { ...ind[k], params: { ...GOLD_A_SETUP_DEFAULTS } };
-      if (i === 0 && !p.parcaGoldAInitialized && !p.panes!.some((other) => other.ind.some((item) => item.id === PARCA_GOLD_A_ID))) ind.push(parcaGoldAIndicator());
-      return { ...pane, ind };
-    });
-    return { ...DEFAULT_PREFS, ...p, panes, speed: panes[0].tf === '1m' ? Math.min(speed, 3) : speed,
-      speedScaleVersion: 2, parcaSetupInitialized: true, parcaGoldInitialized: true, parcaGoldTuned: true, parcaGoldAInitialized: true };
-  }
-  const panes = defaultPanes();
-  if (p.tfA) panes[0] = { tf: p.tfA, ind: [...(p.indA ?? []), parcaIndicator(), parcaGoldIndicator()] };
-  if (p.tfB) panes[1] = { tf: p.tfB, ind: p.indB ?? [] };
-  return { ...DEFAULT_PREFS, count: p.layout === 'dual' ? 2 : 1, panes, speed: panes[0].tf === '1m' ? Math.min(speed, 3) : speed,
-    speedScaleVersion: 2,
-    parcaSetupInitialized: true, parcaGoldInitialized: true, parcaGoldTuned: true, parcaGoldAInitialized: true };
-}
 
 let warned = { day: false, max: false };
 let lastTicket = { riskPct: 1, manualLots: 0.1, useRisk: false, withSl: true, withTp: true };
@@ -742,6 +604,7 @@ export const useApp = create<State>((set, get) => {
     toast: null,
 
     async boot() {
+      void requestPersistence();
       const [allAccounts, allTrades, allSessions, storedSetups, activeSetup, settings, prefs] = await Promise.all([
         db.accounts(),
         db.trades(),

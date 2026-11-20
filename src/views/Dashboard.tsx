@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { downloadBackup, store as db } from '../lib/db';
 import { useApp, payoutBlocker, accountLimits } from '../store';
 import { CertLabel, RuleGauges } from '../components/bits';
 import { Icon } from '../components/Icon';
@@ -63,6 +64,7 @@ export function Dashboard() {
         </button>
       </div>
       <div className="page-body">
+        <BackupNudge hasData={trades.length > 0} />
         <div className="accounts-list-head"><div><h2>Hesaplarım</h2><span>{list.length} hesap</span></div></div>
         <div className="tabs-row accounts-tabs" role="tablist" aria-label="Hesap durumu">
           {TABS.map(([t, label]) => (
@@ -132,6 +134,41 @@ export function Dashboard() {
         )}
 
       </div>
+    </div>
+  );
+}
+
+const DAY = 86_400_000;
+/** Records live only in this browser: after a week without a backup, say so once on the dashboard. */
+function BackupNudge({ hasData }: { hasData: boolean }) {
+  const [last, setLast] = useState<number | null | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void db.kv<number>('lastBackupAt').then((v) => setLast(v ?? null));
+  }, []);
+  if (!hasData || last === undefined || (last !== null && Date.now() - last < 7 * DAY)) return null;
+  const days = last === null ? null : Math.floor((Date.now() - last) / DAY);
+  return (
+    <div className="backup-nudge" role="status">
+      <Icon name="warn" size={16} />
+      <span>
+        {days === null ? 'Henüz yedek alınmadı.' : `Son yedek ${days} gün önce alındı.`} Hesapların ve günlüğün yalnız bu tarayıcıda duruyor.
+      </span>
+      <button
+        className="btn sm"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await downloadBackup();
+            setLast(Date.now());
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <Icon name="download" size={14} /> Yedeği indir
+      </button>
     </div>
   );
 }

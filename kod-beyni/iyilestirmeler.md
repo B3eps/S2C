@@ -4,32 +4,15 @@ tags: [s2c, kod, yapilacaklar]
 
 # İyileştirmeler
 
-20 Kasım 2026 incelemesi. Önem sırasıyla. Çözülen maddeyi sil.
+20 Kasım 2026 incelemesinden kalan açık maddeler. Önem sırasıyla. Çözülen maddeyi sil.
 
-## 1. Acil: kaybolma riski
-- **Dal GitHub'da yok.** `parca-setup-ve-veri-duzeltmeleri` dalındaki iş 20 Kasım 2026'da commit'lendi (`f6c5a16`), ama dal hiç `origin`'e gönderilmedi; yalnız bu diskte duruyor. `git push -u origin parca-setup-ve-veri-duzeltmeleri`.
-- **`main` geride.** Asıl kod Parça dalında; `main` iki adım eski. İş oturunca birleştir.
-- **`analysis/` ham verisi (`.json`, `.jsonl`, `.log`, `.csv`, ~35 MB) git dışında ama `.gitignore`'da da değil.** Yalnız `.md` raporlar commit'lendi. Ham dosyalar için `.gitignore` satırı ekle; bunların yedeği yalnız bu disk.
-- `arastirma-hafizasi/.obsidian/workspace.json` her Obsidian açılışında değişir; `.gitignore`'a ekle.
+## Kodla çözülemeyenler
+- **Kalıcı depolama tarayıcıya bağlı.** Uygulama her açılışta `navigator.storage.persist()` ister; Chrome izni siteyle etkileşime göre kendisi verir, reddedebilir. Asıl güvence yedek: 7 günden eski yedekte panel uyarır (`BackupNudge`, kv `lastBackupAt`).
+- **Kaldıraçlar üçüncü taraf kaynaktan.** FTM endeks 20:1 (thegodfunded.com), BEM kripto/endeks (PropFirmMatch). Firmalar resmî tablo yayımlarsa `programs.ts`'yi güncelle.
+- **BEM kripto komisyonu bilinmiyor.** Kaynaklar %0,025 ile %0,05 arasında çelişiyor; uygulama metal oranını (%0,001) kullanıyor.
+- **Eski hesaplar yeni kaldıraçları almaz.** Hesap kuralları açıldığı anda kopyalanır; o tarihten önceki BEM hesaplarında kripto/endeks kaldıracı uygulama varsayılanıdır (kripto 2x, endeks 20x).
 
-## 2. Kullanıcı verisinin güvenliği
-- **Kalıcı depolama istenmiyor.** `navigator.storage.persist()` çağrısı yok; disk dolunca tarayıcı IndexedDB'yi silebilir. Açılışta bir kez iste.
-- **Otomatik yedek yok.** Yedek tamamen elle. Son yedekten bu yana N gün geçince panelde hatırlatma ya da launcher'ın her açılışta `dist` dışına yedek alması düşünülebilir (PLAN'a ekleme onayı gerekir).
-- **Ekran görüntüleri dataURL metni.** Her işlemde iki WebP metin olarak saklanıyor ve yedekte tek `JSON.stringify` ile birleşiyor; yüzlerce işlemden sonra yedek yavaşlar, bellek taşabilir. `Blob` olarak sakla, yedekte parça parça yaz.
-
-## 3. Doğruluk
-- **`parcaModel1m.ts` etiket hatası:** `source.includes('5dk')` 15dk sinyallerinde de 1 olur. Tam eşleşmeyle düzelt, modeli yeniden eğit (README bunu zaten söylüyor).
-- **Endeks kaldıraç sınırı doğrulanmadı.** FTM sitesinde endeks kaldıracı bulunamadı; uygulama varsayılanı 20x. BEM'in kripto/endeks kuralları da modellenmedi.
-- **`Feed.minutes` sınırsız büyür.** Çok uzun seansta (haftalar) bellek artar. Gerekmeyen eski dakikaları kırp ya da sınırla.
-
-## 4. Kod sağlığı
-- **Dev dosyalar:** `store.ts` ~1500, `indicators.ts` ~1200, `ChartPanel.tsx` ~1150 satır. Bir asistan her değişiklikte hepsini okumak zorunda kalıyor (token maliyeti). Önerilen bölme: `store.ts` → replay döngüsü, emir bileti, hesap/ödeme eylemleri; `indicators.ts` → kategori başına dosya; `ChartPanel.tsx` → emir çizgisi etiketleri ve çizim katmanı ayrı bileşen.
-- **Tekrarlanan kod:** mum birleştirme (`aggregate`) hem `feed.ts` hem `liquidityStrategies.ts` hem scriptlerde ayrı yazılmış. Tek yardımcıya topla.
-- **Tip denetimi dışı:** `vite.config.ts` ve `scripts/` `tsconfig` kapsamında değil. Uç nokta kodu sessizce bozulabilir.
-- `uid()` `Math.random` kullanıyor; `crypto.randomUUID()` daha güvenli.
-- `inspectBackup` her işlem için seansları baştan tarıyor (`sessions.find`); büyük yedekte yavaş. Haritadan oku.
-
-## 5. Test ve CI
-- Çekirdek testler iyi (46 test, hepsi geçiyor). Eksik: `store.ts` akışları (ihlal anı, funded geçişi, ödeme engelleri, gün değişimi). Bunları saf fonksiyonlara çıkarıp `test-core.mjs`'e ekle.
-- CI tarayıcı testini (`test:browser`) çalıştırmıyor; GitHub Actions'ta Chrome var, eklenebilir.
-- CI her itmede çalışır ama dal gönderilmediği için Parça işi CI'ya hiç ulaşmadı (madde 1).
+## Kod sağlığı
+- **`indicators.ts` (~1070) hâlâ uzun.** Ortak hesaplar `indicatorMath.ts`'e ayrıldı; kalan kısım 64 indikatörün tanım tablosu. Gerekirse kategori başına dosyaya bölünebilir.
+- **`store.ts` (~1420) ve `ChartPanel.tsx` (~815)** büyük ölçüde tek parça eylemler; daha fazla bölmek davranış riski taşır, gerekmedikçe dokunma.
+- Araştırma scriptlerinde (`scripts/*.mjs`) mum birleştirme kendi kopyalarıyla duruyor; uygulama `lib/candles.ts`'i kullanıyor.

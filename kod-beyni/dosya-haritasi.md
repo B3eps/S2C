@@ -9,7 +9,7 @@ Satır sayıları Kasım 2026 çalışma kopyası. Bir dosyayı açmadan önce b
 ## Çekirdek (`src/`)
 | Dosya | Görev |
 |---|---|
-| `store.ts` (~1500) | Tüm uygulama durumu ve eylemleri (Zustand `useApp`). Seans, emir bileti, `processMinute`, kural ihlali, funded/payout, oynatma döngüsü, seans kaydını 1 sn'lik kısıtla yazma (`persistSession`/`flushSession`). |
+| `store.ts` (~1420) | Tüm uygulama durumu ve eylemleri (Zustand `useApp`). Seans, emir bileti, `processMinute`, kural ihlali, funded/payout, oynatma döngüsü, seans kaydını 1 sn'lik kısıtla yazma (`persistSession`/`flushSession`). |
 | `App.tsx` | Kabuk, sol menü, görünüm yönlendirme. |
 
 ## `src/lib/` (saf mantık, test edilebilir)
@@ -22,10 +22,14 @@ Satır sayıları Kasım 2026 çalışma kopyası. Bir dosyayı açmadan önce b
 | `drawingScene.ts` | Çizimlerin saf geometrisi: aynı şekiller hem tuvale çizilir (`paintShapes`) hem tıklama tespitinde kullanılır (`hitShapes`). |
 | `overlayPrimitive.ts` | Lightweight Charts series primitive: çizimleri ve Parça etiketlerini grafiğin kendi boyamasında çizer; `afterPaint` SL/TP etiketlerini aynı karede taşır. |
 | `execution.ts` | Dolum ve çıkış kuralları, spread, risk lotu, kaldıraç sınırı, mum içi yol simülasyonu. → [[islem-motoru]] |
-| `accountRules.ts` | Günlük/toplam zarar tabanı, hedef, ödeme eşiği, sayılan günler. |
+| `accountRules.ts` | Günlük/toplam zarar tabanı, hedef, ödeme eşiği, sayılan günler, `payoutBlocker`, `passBlocker`, `consistencyScore`. |
 | `programs.ts` | BEM ve FTM programları (fiyat, indirim, kurallar), `propDay` (22:00 UTC gün sınırı), `payoutNet`, `splitFor`. |
 | `db.ts` | IndexedDB şeması, yedek dışa/içe aktarma ve doğrulama. → [[veri-ve-kayit]] |
-| `indicators.ts` (~1200) | 64 indikatör tanımı ve yardımcılar (`sma`, `ema`, `atr`...), `INDICATORS`, `IND_BY_ID`. |
+| `indicators.ts` (~1070) | 64 indikatör tanımı, `INDICATORS`, `IND_BY_ID`; `sma`, `ema`, `atr`... buradan yeniden dışa aktarılır. |
+| `indicatorMath.ts` | İndikatörlerin seri hesapları (NaN dolgulu diziler, TradingView anlamında). |
+| `prefs.ts` | Grafik tercihleri: `ChartPrefs`, `PaneCfg`, `PaneView`, `SPEEDS`, `LAYOUTS`, `migratePrefs` (kv `prefs`). |
+| `candles.ts` | `aggregate`: mumları zaman dilimine birleştirir (feed ve likidite motoru ortak). |
+| `setupShapes.ts` | Parça sinyal etiketleri ve açık sinyal planı, tuval şekli olarak. |
 | `parcaSetup.ts`, `parcaSetupGold.ts`, `parcaVariants.ts`, `parcaModel.ts`, `parcaModel1m.ts` | Parça sinyal motorları ve modelleri. → [[parca-sinyalleri]] |
 | `liquidityStrategies.ts` | Bağımsız araştırma motoru (sweep/FVG/OB likidite sinyalleri). |
 | `chartController.ts` | Lightweight Charts sarmalayıcı: seriler, emir çizgileri, ekran görüntüsü (WebP). |
@@ -38,7 +42,7 @@ Satır sayıları Kasım 2026 çalışma kopyası. Bir dosyayı açmadan önce b
 | `format.ts` | Para, %, R, lot, tarih biçimleri (Türkçe). |
 
 ## `src/components/`
-`ChartPanel.tsx` (~1000, grafik bölmesi, SL/TP etiketleri, çizim etkileşimi; çizimlerin kendisi `overlayPrimitive` ile tuvalde), `ToolRail.tsx` (çizim araç çubuğu), `ReplayStrip.tsx` (prop günü şeridi, yalnız ileri: `advanceTo`), `IndicatorPicker.tsx`, `TradeChart.tsx` (günlükteki işlem grafiği), `bits.tsx` (CertLabel, Gauge, EquityCurve, Heatmap, CountUp), `PerformanceCalendar.tsx`, `Icon.tsx` (elle çizilmiş ikonlar), `Emblem.tsx`.
+`ChartPanel.tsx` (~815, grafik bölmesi, SL/TP etiketleri, çizim etkileşimi; çizimlerin kendisi `overlayPrimitive` ile tuvalde), `orderLines.ts` (`useLines`: emir/SL/TP etiketleri), `PaneViewMenu.tsx` (pencere görünüm menüsü), `ChartMenu.tsx` (sağ tık menüsü), `ToolRail.tsx` (çizim araç çubuğu, düzen menüsü, `paneGrid`), `ReplayStrip.tsx` (prop günü şeridi, yalnız ileri: `advanceTo`), `IndicatorPicker.tsx`, `TradeChart.tsx` (günlükteki işlem grafiği), `bits.tsx` (CertLabel, Gauge, EquityCurve, Heatmap, CountUp), `PerformanceCalendar.tsx`, `Icon.tsx` (elle çizilmiş ikonlar), `Emblem.tsx`.
 
 ## `src/views/`
 `Trade.tsx` (~730, işlem ekranı), `Dashboard`, `NewAccount`, `Journal`, `Stats`, `Settings` (ayarlar, yedekleme), `Replay` (işlem tekrarı), `Overlays` (büyük anlar ve bildirimler).

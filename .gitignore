@@ -9,3 +9,12 @@ dist
 release/
 .impeccable/review
 .cache
+# research output: raw data stays local, reports (.md) are committed
+/analysis/*.json
+/analysis/*.jsonl
+/analysis/*.log
+/analysis/*.csv
+/analysis/*.flag
+/analysis/*.png
+# Obsidian rewrites its window layout on every open
+**/.obsidian/workspace*.json

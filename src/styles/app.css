@@ -2668,3 +2668,11 @@ input[type='date']:placeholder-shown {
   .replay-bar .lbl-long { display: none; }
   .replay-bar .lbl-short { display: inline; }
 }
+
+/* dashboard: a week without a backup */
+.backup-nudge {
+  display: flex; align-items: center; gap: var(--s-3); margin-bottom: var(--s-4); padding: var(--s-2) var(--s-3);
+  border: 1px solid rgba(240, 162, 75, 0.35); border-radius: var(--r-2); background: var(--ply-1); color: var(--ink-2);
+}
+.backup-nudge > svg { color: var(--warn); }
+.backup-nudge span { flex: 1; }

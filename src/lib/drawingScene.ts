@@ -134,7 +134,9 @@ export function drawingShapes(d: Drawing, env: SceneEnv, sel: boolean): Shape[] 
     case 'fib': {
       const x1 = Math.min(ax, bx);
       const lv = FIB_LEVELS.map((L) => ({ L, y: Y(d.b.p + (d.a.p - d.b.p) * L) ?? 0 }));
-      lv.slice(1).forEach((l, i) => out.push({ k: 'poly', pts: rectPts(x1, lv[i].y, W, l.y), fill: alpha('#a9a397', i % 2 ? 0.1 : 0.05), hit: true }));
+      // the bands reach the right edge and can fill the pane: they grab only once the fib is selected,
+      // so an unselected fib is taken by its lines and the chart still pans everywhere else
+      lv.slice(1).forEach((l, i) => out.push({ k: 'poly', pts: rectPts(x1, lv[i].y, W, l.y), fill: alpha('#a9a397', i % 2 ? 0.1 : 0.05), hit: sel }));
       for (const l of lv) {
         line(x1, l.y, W, l.y, { strong: l.L === 0.5 || l.L === 0.618 });
         label(x1 + 4, l.y - 4, l.L.toFixed(3).replace('.', ','));

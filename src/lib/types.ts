@@ -233,4 +233,5 @@ export const PACKAGES = [5_000, 10_000, 20_000, 25_000, 50_000, 100_000, 200_000
 export const CONTRACT = 100;
 export const MIN_LOT = 0.01;
 
-export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+/** 16 hex characters from the browser's cryptographic random source */
+export const uid = () => crypto.randomUUID().replace(/-/g, '').slice(0, 16);

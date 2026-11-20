@@ -1,4 +1,5 @@
 import type { Bar } from './types';
+import { aggregate } from './candles';
 
 /** Independent research engine. All timestamps are UTC milliseconds; only closed bars are read. */
 export type LiquiditySignal = { variant: 1 | 2 | 3; time: number; side: 'long' | 'short'; entry: number; stop: number; target: number; sweepTime: number };
@@ -9,15 +10,6 @@ type Pending = { side: 1 | -1; sweepTime: number; extreme: number; target: numbe
 const MIN=60_000, H=60*MIN;
 const fresh = (): Frame => ({ bars: [], pivots: [], zones: [], bosUp: -Infinity, bosDown: -Infinity });
 
-function aggregate(bars: Bar[], width: number): Bar[] {
-  const out: Bar[]=[];
-  for (const b of bars) {
-    const t=Math.floor(b.t/width)*width, last=out[out.length-1];
-    if(last && last.t===t) { last.h=Math.max(last.h,b.h); last.l=Math.min(last.l,b.l); last.c=b.c; last.v+=b.v; }
-    else out.push({...b,t});
-  }
-  return out;
-}
 function update(f: Frame, b: Bar, width: number, age: number) {
   const a=f.bars, prev=a[a.length-1]; a.push(b);
   for (const p of f.pivots) if (p.time <= b.t && (p.high ? b.h > p.price : b.l < p.price)) p.taken = true;
