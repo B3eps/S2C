@@ -979,10 +979,46 @@ table.tbl {
 }
 .chart-head .legend {
   display: flex;
+  align-items: center;
   gap: 4px;
   overflow: hidden;
   min-width: 0;
   flex: 1;
+}
+.setup-signal-status {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 6px;
+  height: 26px;
+  padding: 0 7px;
+  border: 1px solid currentColor;
+  border-radius: var(--r-1);
+  background: var(--ply-0);
+  color: var(--up);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.setup-signal-status.short { color: var(--down); }
+.setup-signal-status.idle {
+  color: var(--ink-3);
+  border-color: var(--rule);
+}
+.setup-signal-status strong {
+  padding: 2px 5px;
+  border-radius: 2px;
+  background: currentColor;
+  color: var(--ply-0);
+  font-size: 13px;
+  font-weight: 800;
+}
+.setup-signal-status.long strong { background: var(--up); }
+.setup-signal-status.short strong { background: var(--down); }
+.setup-signal-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 .chip {
   display: inline-flex;

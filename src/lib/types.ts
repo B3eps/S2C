@@ -109,6 +109,10 @@ export interface Rules {
   retainedProfitUsd?: number;
   /** traded days needed since activation / the last payout before a payout */
   payoutMinDays?: number;
+  /** trader share per approved payout (1st, 2nd, ...); the last entry holds from then on. Falls back to `split`. */
+  splitLadder?: number[];
+  /** gold leverage cap of the program; the app default applies when missing */
+  goldLeverage?: number;
 }
 
 export interface Payout {
@@ -213,7 +217,7 @@ export const DEFAULT_RULES: Rules = {
   payoutMin: 1,
 };
 
-export const PACKAGES = [5_000, 10_000, 25_000, 50_000, 100_000, 200_000];
+export const PACKAGES = [5_000, 10_000, 20_000, 25_000, 50_000, 100_000, 200_000];
 
 /** cTrader XAUUSD contract: 1 lot = 100 oz */
 export const CONTRACT = 100;

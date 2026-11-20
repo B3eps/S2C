@@ -6,6 +6,9 @@ import { TF, TFS, TF_LABEL, TF_MS, Drawing, Anchor, Side, uid } from '../lib/typ
 import { TOOL_BY_KIND, FIB_LEVELS, regression, defaultStop } from '../lib/drawings';
 import { IND_BY_ID, ActiveInd } from '../lib/indicators';
 import { createSetupEngine, SetupResult } from '../lib/parcaSetup';
+import { createGoldSetupEngine } from '../lib/parcaSetupGold';
+import { isGoldId, isParcaId, parcaName, variantParams } from '../lib/parcaVariants';
+import type { ParcaId } from '../lib/parcaVariants';
 import { eventsBetween } from '../lib/calendar';
 import { C, SERIES, alpha } from '../lib/theme';
 import { goldPrice, lots as fmtLots, rMult, signedMoney } from '../lib/format';
@@ -166,12 +169,11 @@ export function ChartPanel({ index }: { index: number }) {
   const pane = prefs.panes[index];
   const tf: TF = pane.tf;
   const inds: ActiveInd[] = pane.ind;
-  const setupInd = inds.find((ind) => ind.id === 'parca-setup' && !ind.hidden);
+  const setupInds = inds.filter((ind) => isParcaId(ind.id) && !ind.hidden);
   const [ver, setVer] = useState(0);
   const [barsLen, setBarsLen] = useState(0);
-  const [setup, setSetup] = useState<SetupResult | null>(null);
-  const setupMemo = useRef<{ engineKey: string; engine: ReturnType<typeof createSetupEngine>; key: string; result: SetupResult } | null>(null);
-  const setupBias = setup?.bias ?? 0;
+  const [setups, setSetups] = useState<Record<string, SetupResult>>({});
+  const setupMemo = useRef(new Map<string, { engineKey: string; engine: ReturnType<typeof createSetupEngine>; key: string; result: SetupResult }>());
   const [values, setValues] = useState<Record<string, Record<string, number>>>({});
   const [picker, setPicker] = useState(false);
   const [editing, setEditing] = useState<{ uid: string; x: number; y: number } | null>(null);
@@ -303,34 +305,40 @@ export function ChartPanel({ index }: { index: number }) {
     for (const p of session?.positions ?? []) {
       if (p.openedAt >= first) m.push({ time: ctrl.bucket(p.openedAt), position: p.side === 'long' ? 'belowBar' : 'aboveBar', shape: p.side === 'long' ? 'arrowUp' : 'arrowDown', color: p.side === 'long' ? C.up : C.down, size: 1 });
     }
-    for (const e of eventsBetween(first, f.clock)) {
+    if (!setupInds.length) for (const e of eventsBetween(first, f.clock)) {
       m.push({ time: ctrl.bucket(e.t), position: 'aboveBar', shape: 'square', color: C.gold, text: e.label, size: 0.7 });
     }
-    if (setupInd) {
-      // Only closed candles count, so the result changes when a chart candle or an hour closes.
+    const activeSetupUids = new Set(setupInds.map((ind) => ind.uid));
+    let setupChanged = false;
+    for (const [uid] of setupMemo.current) if (!activeSetupUids.has(uid)) {
+      setupMemo.current.delete(uid);
+      setupChanged = true;
+    }
+    for (const ind of setupInds) {
+      // Each variant has its own causal engine and its own closed-candle marks.
+      const params = variantParams(ind.id as ParcaId, ind.params);
       const closedBars = Math.floor(f.clock / TF_MS[tf]);
-      const key = `${tf}|${first}|${closedBars}|${Math.floor(f.clock / 3_600_000)}|${JSON.stringify(setupInd.params)}`;
-      if (setupMemo.current?.key !== key) {
-        // one engine per chart history and parameter set; it only processes newly closed candles
-        const engineKey = `${tf}|${first}|${JSON.stringify(setupInd.params)}`;
-        const engine = setupMemo.current?.engineKey === engineKey ? setupMemo.current.engine : createSetupEngine(tf, setupInd.params);
-        const result = engine({ bars: ctrl.bars, clock: f.clock, days: f.days(), series: { '15m': f.bars('15m'), '1h': f.bars('1h'), '4h': f.bars('4h') } });
-        setupMemo.current = { engineKey, engine, key, result };
-        setSetup({ ...result });
+      const key = `${tf}|${first}|${closedBars}|${Math.floor(f.clock / 3_600_000)}|${JSON.stringify(params)}`;
+      let memo = setupMemo.current.get(ind.uid);
+      if (memo?.key !== key) {
+        const engineKey = `${tf}|${first}|${JSON.stringify(params)}`;
+        const engine = memo?.engineKey === engineKey ? memo.engine : isGoldId(ind.id) ? createGoldSetupEngine(tf, ind.params, ind.id as ParcaId) : createSetupEngine(tf, ind.params);
+        const result = engine({ bars: ctrl.bars, clock: f.clock, days: f.days(), series: { '5m': f.bars('5m'), '15m': f.bars('15m'), '1h': f.bars('1h'), '4h': f.bars('4h') } });
+        memo = { engineKey, engine, key, result };
+        setupMemo.current.set(ind.uid, memo);
+        setupChanged = true;
       }
-      for (const mark of setupMemo.current!.result.marks) {
+      for (const mark of memo!.result.marks) {
+        if (mark.kind !== 'signal') continue;
         m.push({
           time: ctrl.bucket(mark.t), position: mark.side === 'long' ? 'belowBar' : 'aboveBar',
-          shape: mark.kind === 'signal' ? (mark.side === 'long' ? 'arrowUp' : 'arrowDown') : mark.kind === 'sweep' ? 'square' : 'circle',
-          color: mark.kind === 'sweep' ? C.gold : mark.side === 'long' ? C.up : C.down,
-          text: mark.kind === 'signal' ? 'PARÇA' : mark.source,
-          size: mark.kind === 'signal' ? 1.5 : 0.7,
+          shape: mark.side === 'long' ? 'arrowUp' : 'arrowDown',
+          color: mark.side === 'long' ? C.up : C.down,
+          size: 1.6,
         });
       }
-    } else if (setupMemo.current) {
-      setupMemo.current = null;
-      setSetup(null);
     }
+    if (setupChanged) setSetups(Object.fromEntries([...setupMemo.current].map(([uid, memo]) => [uid, { ...memo.result }])));
     ctrl.setMarkers(m.filter((x) => (x.time as number) * 1000 >= first));
   }, [sessionTrades, session?.positions.length, barsLen, tf, session, indKey]);
 
@@ -542,10 +550,25 @@ export function ChartPanel({ index }: { index: number }) {
   const plotW = Math.max(0, width - scaleW);
   const paneH = ctrl?.mainPaneHeight() ?? 0;
   const drawings = [...(session?.drawings ?? []), ...(draft ? [draft.d] : [])];
-  // the zones nearest to price: every live zone at once would bury the candles
-  const setupZones = setupInd && setup
-    ? [...setup.zones].sort((a, b) => Math.min(Math.abs(a.top - live.price), Math.abs(a.bottom - live.price)) - Math.min(Math.abs(b.top - live.price), Math.abs(b.bottom - live.price))).slice(0, 8)
-    : [];
+  const visibleSignals = ctrl ? setupInds.flatMap((ind) => (setups[ind.uid]?.marks ?? [])
+    .filter((mark) => mark.kind === 'signal' && mark.t >= ctrl.bars[0]?.t)
+    .map((mark) => ({ mark, id: ind.id as ParcaId })))
+    .sort((a, b) => a.mark.t - b.mark.t).slice(-32) : [];
+  // Setup signals show their price plan only; they never create or size an order.
+  const liveSetups: { id: ParcaId; side: 'long' | 'short'; entry: number; stop: number; target: number; strong: boolean; t: number; rr: number; liqR?: number }[] = [];
+  if (ctrl) for (const ind of setupInds) {
+    const sig = [...(setups[ind.uid]?.marks ?? [])].reverse().find((x) => x.kind === 'signal' && x.entry !== undefined);
+    if (!sig) continue;
+    const b = ctrl.bars;
+    let at = b.length - 1;
+    while (at >= 0 && b[at].t > sig.t) at--;
+    if (at < 0 || b[at].t !== sig.t || b.length - 1 - at > 60) continue;
+    const long = sig.side === 'long';
+    let done = false;
+    for (let k = at + 1; k < b.length && !done; k++) done = long ? b[k].l <= sig.stop! || b[k].h >= sig.target! : b[k].h >= sig.stop! || b[k].l <= sig.target!;
+    if (!done) liveSetups.push({ id: ind.id as ParcaId, side: sig.side, entry: sig.entry!, stop: sig.stop!, target: sig.target!, strong: !!sig.strong, t: sig.t,
+      liqR: sig.liqR, rr: Math.round(Math.abs(sig.target! - sig.entry!) / Math.abs(sig.entry! - sig.stop!) * 10) / 10 });
+  }
   void ver;
 
   const renderDrawing = (d: Drawing) => {
@@ -800,9 +823,11 @@ export function ChartPanel({ index }: { index: number }) {
           </button>
         )}
         <div className="legend">
-          {setupInd && <span className="chip" aria-label="Parça Setup günlük yönü" style={{ color: setupBias === 1 ? C.up : setupBias === -1 ? C.down : C.ink2 }}>
-            BIAS: {setupBias === 1 ? 'YUKARI' : setupBias === -1 ? 'AŞAĞI' : 'BELİRSİZ'}
-          </span>}
+          {liveSetups.map((live) => <span key={live.id} className={`setup-signal-status ${live.side}`} role="status" aria-label={`Parça ${parcaName(live.id)} ${live.side === 'long' ? 'AL' : 'SAT'} sinyali`}>
+            <span className="setup-signal-dot" />
+            <span>{parcaName(live.id)}</span>
+            <strong>{live.side === 'long' ? '↑ AL' : '↓ SAT'}{live.strong ? ' ★' : ''}</strong>
+          </span>)}
           {inds.map((ind) => {
             const def = IND_BY_ID[ind.id];
             if (!def) return null;
@@ -852,18 +877,59 @@ export function ChartPanel({ index }: { index: number }) {
               </clipPath>
             </defs>
             <g clipPath={`url(#clip-${slot})`} style={{ pointerEvents: 'none' }}>
-              {setupZones.map((z, i) => {
-                const y1 = ctrl?.priceToY(z.top), y2 = ctrl?.priceToY(z.bottom);
-                const x = ctrl?.timeToX(z.from);
-                if (y1 == null || y2 == null || x == null) return null;
-                const tone = z.side === 1 ? C.up : C.down;
-                const x1 = Math.max(0, Math.min(x, plotW - 40));
+              {visibleSignals.map(({ mark, id }) => {
+                const x = ctrl?.timeToX(mark.t);
+                const bar = ctrl?.bars.find((item) => item.t === mark.t);
+                if (x == null || !bar || x < 0 || x > plotW || paneH < 50) return null;
+                const long = mark.side === 'long';
+                const tone = long ? C.up : C.down;
+                const barY = ctrl?.priceToY(long ? bar.l : bar.h);
+                if (barY == null) return null;
+                const pct = mark.prob !== undefined ? ` %${Math.round(mark.prob * 100)}` : '';
+                const w = (mark.strong ? 110 : 94) + (pct ? 30 : 0) + (id === 'parca-setup-gold-a' ? 18 : 0) + (id === 'parca-trained-1m' ? 38 : 0);
+                const left = Math.max(2, Math.min(x - w / 2, plotW - w - 2));
+                const gold = isGoldId(id);
+                const labelOffset = long ? (gold ? 48 : 22) : (gold ? -69 : -43);
+                const top = Math.max(3, Math.min(barY + labelOffset, paneH - 24));
                 return (
-                  <g key={i}>
-                    <rect x={x1} y={y1} width={plotW - x1} height={Math.max(1, y2 - y1)} fill={alpha(tone, 0.08)} stroke={alpha(tone, 0.28)} strokeWidth={1} />
-                    <text x={plotW - 4} y={y1 + 10} textAnchor="end" style={{ fill: alpha(tone, 0.8), fontSize: 9, fontWeight: 600 }}>
-                      {z.tf === tf ? z.source : `${TF_LABEL[z.tf]} ${z.source}`}
+                  <g key={`${id}-${mark.t}-${mark.side}`}>
+                    <line x1={x} x2={x} y1={long ? barY + 5 : barY - 5} y2={long ? top : top + 22} stroke={tone} strokeWidth={1.5} />
+                    <rect x={left} y={top} width={w} height={22} rx={3} fill={tone} stroke={gold ? C.goldStrong : C.ply0} strokeWidth={gold ? 2 : 1.5} />
+                    <text x={left + w / 2} y={top + 15} textAnchor="middle" style={{ fill: C.ply0, fontSize: 11, fontWeight: 800 }}>
+                      {parcaName(id)} {long ? '↑ AL' : '↓ SAT'}{mark.strong ? ' ★' : ''}{pct}
                     </text>
+                  </g>
+                );
+              })}
+            </g>
+            <g clipPath={`url(#clip-${slot})`} style={{ pointerEvents: 'none' }}>
+              {liveSetups.map((live) => {
+                if (!ctrl) return null;
+                const x0 = ctrl.timeToX(live.t);
+                const ye = ctrl.priceToY(live.entry), ys = ctrl.priceToY(live.stop), yt = ctrl.priceToY(live.target);
+                if (x0 == null || ye == null || ys == null || yt == null) return null;
+                const x1 = Math.max(0, Math.min(x0, plotW - 60));
+                const gold = isGoldId(live.id);
+                const tone = gold ? C.goldStrong : live.side === 'long' ? C.up : C.down;
+                // the three presets stack their tags side by side, each 200 px wide
+                const slotN = live.id === 'parca-trained-1m' ? 3 : live.id === 'parca-setup-gold-a' ? 2 : gold ? 1 : 0;
+                const tagX = Math.max(2, plotW - 204 * (slotN + 1));
+                const rightLine = (priceY: number, name: string, color: string, dash: string, offset = 0) => {
+                  const y = Math.max(11, Math.min(paneH - 11, priceY));
+                  const yy = Math.max(11, Math.min(paneH - 11, y + offset));
+                  return <g key={name}>
+                    <line x1={x1} x2={plotW} y1={priceY} y2={priceY} stroke={color} strokeWidth={name === 'GİRİŞ' ? 1.5 : 1} strokeDasharray={dash} />
+                    <rect x={tagX} y={yy - 9} width={200} height={18} rx={3} fill={color} />
+                    <text x={tagX + 100} y={yy + 4} textAnchor="middle" style={{ fill: C.ply0, fontSize: 11, fontWeight: 800 }}>
+                      {parcaName(live.id)} {name}
+                    </text>
+                  </g>;
+                };
+                return (
+                  <g key={live.id}>
+                    {rightLine(ye, 'GİRİŞ', tone, 'none')}
+                    {rightLine(ys, 'STOP', C.down, '5 3')}
+                    {rightLine(yt, 'HEDEF', C.up, '5 3')}
                   </g>
                 );
               })}

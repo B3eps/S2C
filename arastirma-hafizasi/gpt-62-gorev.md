@@ -1,0 +1,11 @@
+# GPT 6.2 için görev
+
+Bu projede XAU/USD için mantıklı, verilerle sınanmış gün içi stratejiler geliştirmeme yardım et. Önce `arastirma-hafizasi/README.md`, `istek-ve-kisitlar.md` ve `guvenilirlik.md` dosyalarını oku. Kodun mevcut durumunu kontrol et; önceki çalışmaları silme veya sonuçlarını tekrarlama. Kısa, güncel hafıza notları tutarak gereksiz bağlam ve token tüketimini azalt.
+
+Önce simülasyonun güvenilirliğini incele. Özellikle not edilen hesap ihlali sıralamasını, emirlerin gerçekleşmesini, mum içi belirsizliği, veri boşluklarını ve geleceğe bakma riskini doğrula. Gerekli düzeltmeleri gerekçeli ve anlamlı testlerle yap. Aynı mumdaki belirsiz sıraları kesin gerçek gibi sunma; mümkünse alternatif veya ihtiyatlı senaryoları karşılaştır. Mevcut hesap, spread ve komisyon kurallarını kullan; gerçek piyasayla birebir eşitlik iddia etme.
+
+İlk olarak Fibonacci düzeltmesi fikrini geliştir ve test et. 0,60–0,70 bölgesi bir fikir: salınım seçimi, giriş, teyit, FVG/iFVG veya diğer anlamlı bağlam, stop, hedef ve lot hesabı için kendi mantıklı ve ölçülebilir kurallarını geliştir. Tek işlem zaman dilimi 1 dakikadır; uygun ise 15 dakika, 4 saat ve günlük bağlamı yalnız o anda erişilebilir verilerle kullan. Açık hipotezler ve karşılaştırma örnekleri kur; sonuçları inceledikten sonra filtre eklemenin aşırı uyum riskini hesaba kat.
+
+Zaman sıralı geliştirme/doğrulama/test ayrımı yap; gerçekten incelenmemiş test dönemini seçimden önce ayır ve kuralları dondurmadan ona bakma. Daha önce incelenmiş veriyi bakılmamış sayma. İşlem sayısı, belirsizlik, maliyet sonrası kazanma oranı, ortalama kazanç/kayıp, beklenti, düşüş, günlük performans ve FTM hesap geçiş/ihlal sonuçlarını göster. Başarısızlıkları ve başarılı işlemleri incele, fakat işlem sonrası hikâyeleri kanıt olarak gösterme. %65 kazanma ve günlük 100 $ hedeflerini garanti ya da zorunlu sonuç sayma.
+
+Fibonacci çalışmasını tamamlayıp ayrı bir raporla sun. Ancak ondan sonra üç farklı stratejiyi sırayla ele al; zaman veya bağlam yetmezse mevcut aşamayı yarım bırakmadan hafızaya durum ve devam adımlarını yaz. Her strateji için ayrı rapor, tekrar üretme komutları, veri dönemi ve sınırlamalar ver. Başarılı görünenlerin uygulamaya nasıl eklenebileceğini öner; kullanıcı açıkça istemedikçe stratejileri uygulamaya ekleme. Güvenilir bulguları abartma ve sonuç kötü ise açıkça söyle.

@@ -12,13 +12,15 @@ try {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   const start = Date.UTC(2025, 0, 7, 10, 12);
+  const riskStart = Date.UTC(2025, 0, 9, 10, 12);
   await page.route('**/api/candles?**', route => {
     const q = new URL(route.request().url()).searchParams;
     const step = { '1m': 1, '5m': 5, '15m': 15, '1h': 60, '4h': 240 }[q.get('tf')] * 60000;
     const rows = [];
     for (let t = Math.ceil(Number(q.get('from')) / step) * step; t < Number(q.get('to')); t += step) {
       // Full hourly bars deliberately include an extreme absent in the first twelve minutes.
-      rows.push([t, 100, step < 3600000 ? 101 : 180, 99, 100, 1]);
+      if (t === riskStart && step === 60000) rows.push([t, 100, 105, 95, 101, 1]);
+      else rows.push([t, 100, step < 3600000 ? 101 : 180, 99, 100, 1]);
     }
     return route.fulfill({ json: rows });
   });
@@ -61,6 +63,10 @@ try {
     return [s.clockMs,s.orders[0].id,s.positions[0].shotOpen,s.drawings[0].id];
   });
   assert.deepEqual(restored,[start,'o','img','d']);
+  await page.getByRole('button', { name: 'İndikatör', exact: true }).first().click();
+  await page.getByRole('button', { name: /Parça 1dk Deneysel/ }).click();
+  await page.waitForFunction(() => window.__s2c.getState().prefs.panes.some(p => p.ind.some(i => i.id === 'parca-trained-1m')));
+  await page.getByRole('dialog', { name: 'İndikatör ekle' }).getByRole('button', { name: 'Kapat', exact: true }).click();
   await page.getByRole('button',{name:'Gün sonuna ilerle'}).click();
   await page.waitForFunction(() => window.__s2c.getState().session?.dayKey === '2025-01-08', null, { timeout: 30000 });
   const dayEnd = await page.evaluate(() => {
@@ -116,8 +122,31 @@ try {
   await page.getByRole('combobox',{name:'Setup klasörleri'}).selectOption(oldSetupId);
   await page.waitForFunction(() => window.__s2c?.getState().ready && window.__s2c.getState().accounts.length === 2);
   assert.equal(await page.evaluate(() => window.__s2c.getState().trades.length),3);
+  await page.evaluate(async start => {
+    const { PROGRAMS, propDay } = await import('/src/lib/programs.ts');
+    const engine = window.__s2c;
+    const setupId = engine.getState().activeSetupId;
+    const rules = PROGRAMS.find(p => p.id === 'ftm-infinity-plus').rules;
+    const a = { id:'risk', setupId, no:'S2C-3', status:'active', phase:'challenge', size:5000,
+      balance:5000, createdAt:start, rules, tradingDays:[], payouts:[] };
+    const s = { id:'risk-session', setupId, accountId:a.id, startMs:start, clockMs:start, startedAt:start,
+      dayKey:propDay(start), dayStartEquity:5000, orders:[], drawings:[],
+      positions:[{ id:'risk-position', side:'long', lots:0.4, entry:100, tp:104,
+        openedAt:start-60000, orderType:'market' }] };
+    engine.setState(state => ({ accounts:[...state.accounts,a], sessions:[...state.sessions,s] }));
+    await engine.getState().startSession(a.id);
+    engine.getState().stepMinutes(1);
+  }, riskStart);
+  await page.waitForFunction(() => window.__s2c.getState().overlay?.kind === 'violation');
+  const risk = await page.evaluate(() => {
+    const state = window.__s2c.getState();
+    const t = state.trades.find(t => t.id === 'risk-position');
+    return [state.accounts.find(a => a.id === 'risk').status, t.reason, t.exit];
+  });
+  assert.deepEqual(risk.slice(0,2), ['violated','violation']);
+  assert.ok(Math.abs(risk[2] - 96.255) < 1e-7);
   assert.deepEqual(errors,[]);
-  console.log('Replay cutoff, restore, day-end replay, setup isolation, charts and calendar navigation passed.');
+  console.log('Replay cutoff, restore, day-end replay, setup isolation, charts, calendar navigation and account-limit event order passed.');
 } finally {
   await browser?.close();
   await server.close();

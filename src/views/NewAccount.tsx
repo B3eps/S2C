@@ -54,11 +54,16 @@ export function NewAccount() {
             {rules.minDayPct ? ` kârlı (günde ≥ ${pctTr(rules.minDayPct)})` : ''}
           </span>
           <span>
-            Kâr payı <b>{pctTr(rules.split)}</b>
+            Kâr payı <b>{rules.splitLadder?.length ? [...new Set(rules.splitLadder)].map(pctTr).join(' → ') : pctTr(rules.split)}</b>
           </span>
           {rules.payoutMinUsd ? (
             <span>
               En az ödeme <b>{money0(rules.payoutMinUsd)}</b>
+            </span>
+          ) : null}
+          {rules.goldLeverage ? (
+            <span>
+              Altın kaldıracı <b>{rules.goldLeverage}x</b>
             </span>
           ) : null}
           {rules.commissionPct ? (
@@ -68,9 +73,9 @@ export function NewAccount() {
           ) : null}
         </div>
         <div className="pkg-grid">
-        {PACKAGES.map((size) => {
+        {PACKAGES.filter((size) => !prog || prog.prices[size] !== undefined || Object.keys(prog.prices).length === 0).map((size) => {
           const list = prog?.prices[size];
-          const price = list !== undefined ? salePrice(list) : 0;
+          const price = list !== undefined ? salePrice(list, prog?.discount) : 0;
           return (
             <button key={size} className="pkg" disabled={!!prog && list === undefined} onClick={() => S().createAccount(size, prog?.id)}>
               <div className="cert">

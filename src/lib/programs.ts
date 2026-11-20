@@ -22,10 +22,42 @@ export interface Program {
   name: string;
   kind: string;
   prices: Record<number, number>;
+  /** this program's standing discount; DISCOUNT when missing */
+  discount?: number;
   rules: Rules;
 }
 
+/** Trader share of the next payout, given how many were already approved. */
+export const splitFor = (r: Rules, approved: number) => {
+  const l = r.splitLadder;
+  return l && l.length ? l[Math.min(approved, l.length - 1)] : r.split;
+};
+
 const base = { rulesVersion: '2026-11-10', split: 80, payoutMin: 0, payoutMinUsd: 150, payoutFeePct: 2, commissionPct: 0.001 };
+
+/**
+ * FTM Perps "Infinity" plans (ftmperps.com, read Nov 2026): $5K / $10K / $20K, one phase,
+ * no time limit, no consistency rule, no minimum days, no payout buffer or cap, static max loss,
+ * daily loss 3% of the initial balance measured from the higher of balance/equity at the daily reset,
+ * payouts any day from $50 once the balance is 1% above the start, split 80/80/80/80/85/90,
+ * commission 0.005% per side on gold, no swap, gold leverage 10x. The standing discount is 50%.
+ * Infinity's max loss is 3% (FAQ, third-party listings); one marketing line on the site says 5%.
+ * Not modelled: 24/7 trading and weekend candles, the $40K total allocation, the double-pay guarantee.
+ */
+const ftm = {
+  rulesVersion: '2026-11-13',
+  split: 80,
+  splitLadder: [80, 80, 80, 80, 85, 90],
+  payoutMin: 1,
+  payoutMinUsd: 50,
+  payoutFeePct: 0,
+  commissionPct: 0.005,
+  dailyLoss: 3,
+  dailyBase: 'max' as const,
+  maxType: 'static' as const,
+  minDays: 0,
+  goldLeverage: 10,
+};
 
 export const PROGRAMS: Program[] = [
   {
@@ -103,9 +135,25 @@ export const PROGRAMS: Program[] = [
       payoutBufferPct: 50,
     },
   },
+  {
+    id: 'ftm-infinity',
+    name: 'FTM Infinity',
+    kind: '1 aşama · Perps',
+    discount: 0.5,
+    prices: { 5000: 68, 10000: 138, 20000: 258 },
+    rules: { ...ftm, target: 9, targets: [9], maxLoss: 3 },
+  },
+  {
+    id: 'ftm-infinity-plus',
+    name: 'FTM Infinity Plus',
+    kind: '1 aşama · Perps',
+    discount: 0.5,
+    prices: { 5000: 78, 10000: 158, 20000: 298 },
+    rules: { ...ftm, target: 10, targets: [10], maxLoss: 5 },
+  },
 ];
 
-export const salePrice = (list: number) => Math.round(list * (1 - DISCOUNT) * 100) / 100;
+export const salePrice = (list: number, discount = DISCOUNT) => Math.round(list * (1 - discount) * 100) / 100;
 export const payoutNet = (gross: number, split: number, feePct = 0) => gross * (split / 100) * (1 - feePct / 100);
 
 /** Profit targets per step; old accounts only carry `target`. */

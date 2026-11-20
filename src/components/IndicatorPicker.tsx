@@ -3,6 +3,7 @@ import { ActiveInd, CATEGORIES, Category, IND_BY_ID, INDICATORS, defaultParams }
 import { SERIES } from '../lib/theme';
 import { uid } from '../lib/types';
 import { Icon } from './Icon';
+import { PARCA_TRAINED_1M_ID } from '../lib/parcaVariants';
 
 export function IndicatorPicker({ onClose, onAdd, existing }: { onClose: () => void; onAdd: (i: ActiveInd) => void; existing: ActiveInd[] }) {
   const [q, setQ] = useState('');
@@ -96,6 +97,7 @@ export function ParamPopover({ ind, x, y, onChange, onClose }: { ind: ActiveInd;
   return (
     <div ref={ref} className="param-pop" style={{ left: Math.min(x, window.innerWidth - 280), top: Math.min(y + 12, window.innerHeight - 320) }}>
       <h2>{def.name}</h2>
+      {ind.id === PARCA_TRAINED_1M_ID && <p className="muted">Yalnızca 1 dakikalık grafikte sinyal üretir. Geçmiş işlemlerle eğitilen bu deneysel filtre, sonraki dönem testinde kazanma oranını artırmadı.</p>}
       {def.params.length > 0 && (
         <div className="grid">
           {def.params.map((p) => (

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
+import { splitFor } from '../lib/programs';
 import { useApp, SPEEDS, ticketLots, riskOf, pnlOf, markPrice, spreadOf, accountLimits, countedDays, passBlocker, payoutBlocker, consistencyScore } from '../store';
+import { isParcaId } from '../lib/parcaVariants';
 import { ChartPanel } from '../components/ChartPanel';
 import { ToolRail, GRID } from '../components/ToolRail';
 import { CertLabel, CountUp, RuleGauges } from '../components/bits';
@@ -369,7 +371,7 @@ function OrderPanel() {
                 %{account.rules.payoutMin} · {money0(lim.payoutAt)}
               </dd>
               <dt>Kâr payın</dt>
-              <dd>%{account.rules.split}</dd>
+              <dd>%{splitFor(account.rules, account.payouts.length)}</dd>
               {!!account.rules.payoutConsistencyPct && (
                 <>
                   <dt>Ödeme tutarlılığı</dt>
@@ -534,11 +536,14 @@ function Dock() {
   const session = useApp((s) => s.session)!;
   const sessionTrades = useApp((s) => s.sessionTrades);
   const playing = useApp((s) => s.playing);
+  const seekingSignal = useApp((s) => s.seekingSignal);
   const dataWait = useApp((s) => s.dataWait);
   const prefs = useApp((s) => s.prefs);
   const live = useApp((s) => s.live);
   const editing = useApp((s) => s.editing);
   const S = useApp.getState;
+  const oneMinute = prefs.panes[0].tf === '1m';
+  const hasSetup = prefs.panes.slice(0, prefs.count).some((pane) => pane.ind.some((ind) => isParcaId(ind.id) && !ind.hidden));
   const open = prefs.dockOpen !== false;
   const startResize = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -561,22 +566,26 @@ function Dock() {
     <div className={`dock ${open ? '' : 'folded'}`}>
       <div className="dock-grip" onPointerDown={startResize} onDoubleClick={() => S().setPrefs({ dockOpen: !open })} title="Yüksekliği ayarlamak için sürükle, katlamak için çift tıkla" />
       <div className="replay-bar">
-        <button className={`play ${playing ? 'on' : ''}`} title={playing ? 'Duraklat' : 'Oynat'} onClick={() => S().setPlaying(!playing)}>
+        <button className={`play ${playing ? 'on' : ''}`} title={playing ? 'Duraklat' : 'Oynat'} disabled={seekingSignal} onClick={() => S().setPlaying(!playing)}>
           <Icon name={playing ? 'pause' : 'play'} size={16} />
         </button>
-        <button className="btn sm" onClick={() => S().stepBar()} disabled={playing} title="Sonraki mum (Boşluk)">
+        <button className="btn sm" onClick={() => S().stepBar()} disabled={playing || seekingSignal} title="Sonraki mum (Boşluk)">
           <Icon name="step" size={14} /> Sonraki mum <span className="kbd">Boşluk</span>
         </button>
-        <button className="btn sm" onClick={() => void S().advanceToDayEnd()} disabled={playing || dataWait} title="22:00 UTC'ye kadar tüm mumları, emirleri ve risk kurallarını sırayla işler. Açık pozisyonlar korunur.">
+        <button className="btn sm" onClick={() => void S().advanceToDayEnd()} disabled={playing || seekingSignal || dataWait} title="22:00 UTC'ye kadar tüm mumları, emirleri ve risk kurallarını sırayla işler. Açık pozisyonlar korunur.">
           Gün sonuna ilerle
         </button>
+        <button className="btn sm" onClick={() => seekingSignal ? S().stopSignalSeek() : void S().advanceToNextSignal()} disabled={!seekingSignal && (playing || dataWait || !hasSetup)} title={seekingSignal ? 'Sinyal aramasını durdur' : 'Klasik veya Gold sinyaline kadar mumları işler ve tam sinyalde durur'}>
+          {seekingSignal ? 'Aramayı durdur' : 'Sinyale ilerle'}
+        </button>
         <div className="seg" role="group" aria-label="Hız" style={{ marginLeft: 8 }}>
-          {SPEEDS.map((sp, i) => (
+          {SPEEDS.map((sp, i) => (oneMinute && sp > 4 ? null :
             <button key={sp} aria-pressed={prefs.speed === i} onClick={() => S().setPrefs({ speed: i })} title={`Saniyede ${sp} mum`}>
-              {sp}×
+              {sp === 0.5 ? '½×' : `${sp}×`}
             </button>
           ))}
         </div>
+        {seekingSignal && <span className="wait"><span className="spin" /> Sinyal aranıyor</span>}
         {dataWait && (
           <span className="wait">
             <span className="spin" /> Veri yükleniyor

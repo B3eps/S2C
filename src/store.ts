@@ -3,9 +3,16 @@ import { Feed, randomStart } from './lib/feed';
 import { store as db } from './lib/db';
 import { play, configureSound } from './lib/sound';
 import { atr } from './lib/indicators';
+import { createSetupEngine } from './lib/parcaSetup';
+import { createGoldSetupEngine } from './lib/parcaSetupGold';
+import type { SetupMark } from './lib/parcaSetup';
+import { GOLD_A_SETUP_DEFAULTS, GOLD_SETUP_DEFAULTS, isGoldId, isParcaId, PARCA_CLASSIC_ID, PARCA_GOLD_A_ID, PARCA_GOLD_ID, parcaName } from './lib/parcaVariants';
+import type { ParcaId } from './lib/parcaVariants';
 import { money0 } from './lib/format';
-import { PROGRAMS, payoutNet, propDay, salePrice, stepTargets } from './lib/programs';
-import { DEFAULT_SPREAD, entryPrice, markPrice, pendingFill, positionExit, riskLots, worstEquity } from './lib/execution';
+import { PROGRAMS, payoutNet, propDay, salePrice, splitFor } from './lib/programs';
+import { DEFAULT_SPREAD, availableLots, conservativeCandle, entryPrice, equityAt, markPrice, maxLotsFor, riskLots, tradePnl } from './lib/execution';
+import { accountLimits, countedDays, maximumLossFloor } from './lib/accountRules';
+export { accountLimits, countedDays } from './lib/accountRules';
 import type { ActiveInd } from './lib/indicators';
 import {
   Account, CONTRACT, CloseReason, DEFAULT_RULES, Drawing, DrawingKind, MIN_LOT, Order, OrderType, Position, Rules,
@@ -90,10 +97,14 @@ export interface Notice {
 
 export interface ChartPrefs {
   parcaSetupInitialized?: boolean;
+  parcaGoldInitialized?: boolean;
+  parcaGoldTuned?: boolean;
+  parcaGoldAInitialized?: boolean;
   /** how many chart panes are shown (1, 2, 3, 4, 6, 8) */
   count: number;
   panes: PaneCfg[];
   speed: number;
+  speedScaleVersion?: 2;
   /** drawings snap to candle time and OHLC (hold Alt to place freely) */
   magnet?: boolean;
   /** bottom dock: height in px, and whether it is folded to its replay bar */
@@ -104,7 +115,7 @@ export interface ChartPrefs {
   orderW?: number;
 }
 
-export const SPEEDS = [1, 2, 4, 8, 16, 32];
+export const SPEEDS = [0.5, 1, 2, 4, 8, 16, 32];
 export const LAYOUTS = [1, 2, 3, 4, 6, 8];
 
 export interface PaneCfg {
@@ -112,8 +123,10 @@ export interface PaneCfg {
   ind: ActiveInd[];
 }
 const PANE_TFS: TF[] = ['5m', '1h', '15m', '4h', '1m', '5m', '15m', '1h'];
-const parcaIndicator = (): ActiveInd => ({ uid: uid(), id: 'parca-setup', params: { pivot: 2, window: 8, zoneAge: 80 }, colors: ['#c9a96e'] });
-const defaultPanes = (): PaneCfg[] => PANE_TFS.map((tf, i) => ({ tf, ind: i === 0 ? [parcaIndicator()] : [] }));
+const parcaIndicator = (): ActiveInd => ({ uid: uid(), id: PARCA_CLASSIC_ID, params: { pivot: 2, window: 10, zoneAge: 80 }, colors: ['#c9a96e'] });
+const parcaGoldIndicator = (): ActiveInd => ({ uid: uid(), id: PARCA_GOLD_ID, params: { ...GOLD_SETUP_DEFAULTS }, colors: ['#e8c46e'] });
+const parcaGoldAIndicator = (): ActiveInd => ({ uid: uid(), id: PARCA_GOLD_A_ID, params: { ...GOLD_A_SETUP_DEFAULTS }, colors: ['#f2d58a'] });
+const defaultPanes = (): PaneCfg[] => PANE_TFS.map((tf, i) => ({ tf, ind: i === 0 ? [parcaIndicator(), parcaGoldIndicator(), parcaGoldAIndicator()] : [] }));
 /** The first pane drives replay steps and trade records. */
 export const mainTf = (p: ChartPrefs) => p.panes[0].tf;
 
@@ -140,6 +153,7 @@ interface State {
   loading: { progress: number; error?: string; accountId?: string } | null;
   live: Live;
   playing: boolean;
+  seekingSignal: boolean;
   dataWait: boolean;
   tool: Tool;
   ticket: Ticket | null;
@@ -156,10 +170,13 @@ interface State {
   switchSetup(id: string): Promise<void>;
   go(v: View): void;
   createAccount(size: number, programId?: string): Promise<void>;
+  resetAllAccounts(): Promise<void>;
   archiveAccount(id: string, archived: boolean): Promise<void>;
   startSession(accountId: string): Promise<void>;
   endSession(reason?: Notice['reason']): Promise<void>;
   advanceToDayEnd(): Promise<void>;
+  advanceToNextSignal(): Promise<void>;
+  stopSignalSeek(): void;
   stepBar(): void;
   stepMinutes(n: number): void;
   setPlaying(p: boolean): void;
@@ -207,6 +224,14 @@ export const pnlOf = (side: Side, entry: number, exit: number, lots: number) => 
 export const riskOf = (entry: number, sl: number | undefined, lots: number) =>
   sl === undefined ? undefined : Math.abs(entry - sl) * lots * CONTRACT;
 const roundLots = (x: number) => Math.max(MIN_LOT, Math.floor(x / MIN_LOT + 1e-9) * MIN_LOT);
+/** XAUUSD gross exposure ceiling: account equity × fixed 15:1 leverage. */
+export const GOLD_LEVERAGE = 15;
+export const maxGoldLots = (equity: number, price: number, lev = GOLD_LEVERAGE) => maxLotsFor(equity, price, lev);
+export const goldMarginRequired = (lots: number, price: number, lev = GOLD_LEVERAGE) => lots * price * CONTRACT / lev;
+
+function availableGoldLots(a: Account, s: SessionRec, price: number, excludingOrderId?: string) {
+  return availableLots(a.balance, a.rules.goldLeverage ?? GOLD_LEVERAGE, s.positions, s.orders, price, excludingOrderId);
+}
 
 export function ticketLots(t: Ticket, balance: number, entry = t.entry) {
   if (t.useRisk && t.sl !== undefined) {
@@ -216,33 +241,9 @@ export function ticketLots(t: Ticket, balance: number, entry = t.entry) {
 }
 
 /** Pending orders take their type from the side and where the price sits relative to the market. */
-export function deriveType(side: Side, entry: number, price: number): 'limit' | 'stop' {
-  if (side === 'long') return entry < price ? 'limit' : 'stop';
-  return entry > price ? 'limit' : 'stop';
-}
-
-export function accountLimits(a: Account, s: SessionRec | null) {
-  const size = a.size;
-  const targets = stepTargets(a.rules);
-  const step = Math.min(a.step ?? 0, targets.length - 1);
-  const dayFloor = (s?.dayStartEquity ?? a.balance) - (size * a.rules.dailyLoss) / 100;
-  const maxAmt = (size * a.rules.maxLoss) / 100;
-  // trailing: rises with the closed balance, never falls, locks at the initial balance
-  const maxFloor = a.rules.maxType === 'trailing' ? Math.min(size, Math.max(size - maxAmt, (a.peak ?? size) - maxAmt)) : size - maxAmt;
-  const buffer = (a.rules.retainedProfitUsd ?? 0) + ((a.rules.payoutBufferPct ?? 0) / 100) * ((size * a.rules.dailyLoss) / 100);
-  const targetPct = targets[step];
-  const target = size * (1 + targetPct / 100);
-  const minGross = Math.max(a.rules.payoutMinUsd ?? 0, size * a.rules.dailyLoss * (a.rules.payoutMinimumDailyPct ?? 0) / 10000) / (a.rules.split / 100);
-  const payoutAt = Math.max(size * (1 + a.rules.payoutMin / 100), size + buffer + minGross, size + 0.01);
-  return { dayFloor, maxFloor, target, targetPct, step, steps: targets.length, payoutAt, buffer };
-}
-
-/** Days that count toward the minimum: profitable days when the program asks for them, else any traded day. */
-export function countedDays(a: Account) {
-  const pct = a.rules.minDayPct ?? 0;
-  if (!pct) return new Set(a.tradingDays).size;
-  const need = (a.size * pct) / 100;
-  return Object.values(a.dayPnl ?? {}).filter((v) => v >= need).length;
+export function deriveType(side: Side, entry: number, bid: number, spread = 0): 'limit' | 'stop' {
+  const quote = entryPrice(side, bid, spread);
+  return (side === 'long' ? entry < quote : entry > quote) ? 'limit' : 'stop';
 }
 
 /** Best day as a % of total realised profit (the firm's consistency score). */
@@ -323,9 +324,13 @@ const accountNo = (existing: Account[]) => {
 
 const DEFAULT_PREFS: ChartPrefs = {
   parcaSetupInitialized: true,
+  parcaGoldInitialized: true,
+  parcaGoldTuned: true,
+  parcaGoldAInitialized: true,
   count: 1,
   panes: defaultPanes(),
   speed: 1,
+  speedScaleVersion: 2,
   magnet: true,
   dockH: 232,
   dockOpen: true,
@@ -334,18 +339,43 @@ const DEFAULT_PREFS: ChartPrefs = {
 
 function migratePrefs(raw: unknown): ChartPrefs {
   const p = (raw ?? {}) as Partial<ChartPrefs> & { layout?: string; tfA?: TF; tfB?: TF; indA?: ActiveInd[]; indB?: ActiveInd[] };
+  const speed = p.speedScaleVersion === 2 ? p.speed ?? 1 : p.speed === undefined ? 1 : Math.min(SPEEDS.length - 1, p.speed + 1);
   if (p.panes && p.panes.length === 8) {
-    const panes = p.panes.map((pane, i) => i === 0 && !p.parcaSetupInitialized ? { ...pane, ind: [...pane.ind, parcaIndicator()] } : pane);
-    return { ...DEFAULT_PREFS, ...p, panes, parcaSetupInitialized: true };
+    const panes = p.panes.map((pane, i) => {
+      const ind = pane.ind.map((item) => {
+        const v = item.params;
+        // Gold settings saved before the engulf entry existed: move to the current preset.
+        if (item.id === PARCA_GOLD_ID && (v.entry === undefined || v.ema === undefined || v.adx === undefined || v.minP === undefined || v.room === undefined)) return { ...item, params: { ...GOLD_SETUP_DEFAULTS } };
+        if (!p.parcaGoldTuned && item.id === PARCA_GOLD_ID && v.pivot === 3 && v.window === 6 &&
+          v.zoneAge === 60 && v.minGap === 0.45 && v.biasMode === 2 && v.sweep === 1 && v.session === 1)
+          return { ...item, params: { ...v, sweep: 2 } };
+        // Migrate only the previous untouched preset; keep deliberate user settings.
+        if (item.id !== 'parca-setup' || v.pivot !== 2 || v.window !== 8 || v.zoneAge !== 80 ||
+          (v.minGap !== undefined && v.minGap !== 0.3) ||
+          (v.biasMode !== undefined && v.biasMode !== 2) ||
+          (v.sweep !== undefined && v.sweep !== 0) ||
+          (v.session !== undefined && v.session !== 1)) return item;
+        return { ...item, params: { ...v, window: 10, minGap: 0.25 } };
+      });
+      if (i === 0 && !p.parcaSetupInitialized && !ind.some((item) => item.id === PARCA_CLASSIC_ID)) ind.push(parcaIndicator());
+      if (i === 0 && !p.parcaGoldInitialized && !p.panes!.some((other) => other.ind.some((item) => item.id === PARCA_GOLD_ID))) ind.push(parcaGoldIndicator());
+      if (i === 0) for (let k = 0; k < ind.length; k++) if (ind[k].id === PARCA_GOLD_A_ID && (ind[k].params.minP === undefined || ind[k].params.room === undefined)) ind[k] = { ...ind[k], params: { ...GOLD_A_SETUP_DEFAULTS } };
+      if (i === 0 && !p.parcaGoldAInitialized && !p.panes!.some((other) => other.ind.some((item) => item.id === PARCA_GOLD_A_ID))) ind.push(parcaGoldAIndicator());
+      return { ...pane, ind };
+    });
+    return { ...DEFAULT_PREFS, ...p, panes, speed: panes[0].tf === '1m' ? Math.min(speed, 3) : speed,
+      speedScaleVersion: 2, parcaSetupInitialized: true, parcaGoldInitialized: true, parcaGoldTuned: true, parcaGoldAInitialized: true };
   }
   const panes = defaultPanes();
-  if (p.tfA) panes[0] = { tf: p.tfA, ind: [...(p.indA ?? []), parcaIndicator()] };
+  if (p.tfA) panes[0] = { tf: p.tfA, ind: [...(p.indA ?? []), parcaIndicator(), parcaGoldIndicator()] };
   if (p.tfB) panes[1] = { tf: p.tfB, ind: p.indB ?? [] };
-  return { ...DEFAULT_PREFS, count: p.layout === 'dual' ? 2 : 1, panes, speed: p.speed ?? DEFAULT_PREFS.speed };
+  return { ...DEFAULT_PREFS, count: p.layout === 'dual' ? 2 : 1, panes, speed: panes[0].tf === '1m' ? Math.min(speed, 3) : speed,
+    speedScaleVersion: 2,
+    parcaSetupInitialized: true, parcaGoldInitialized: true, parcaGoldTuned: true, parcaGoldAInitialized: true };
 }
 
 let warned = { day: false, max: false };
-let lastTicket = { riskPct: 1, manualLots: 0.1, useRisk: true, withSl: true, withTp: true };
+let lastTicket = { riskPct: 1, manualLots: 0.1, useRisk: false, withSl: true, withTp: true };
 
 /** 1.5 × ATR(14) of the main chart: where a fresh stop is first drawn. */
 export function defaultDistance() {
@@ -358,6 +388,37 @@ let playRaf = 0;
 
 // ── store ─────────────────────────────────────────────────────────────────────
 export const useApp = create<State>((set, get) => {
+  const setupWatchers = new Map<string, { engine: ReturnType<typeof createSetupEngine>; lastSignalAt: number }>();
+  /** Check only completed chart candles, using the same indicator engine as the chart. */
+  const scanSetupSignals = (prime = false): { mark: SetupMark; id: ParcaId } | null => {
+    if (!feed || !get().session) return null;
+    const { panes, count } = get().prefs;
+    const clock = feed.clock;
+    const previousClock = feed.ci > 0 ? feed.minutes[feed.ci - 1].t + 60_000 : clock - 60_000;
+    const active = panes.slice(0, count).flatMap((pane, i) => pane.ind
+      .filter((ind) => isParcaId(ind.id) && !ind.hidden)
+      .map((ind) => ({ pane, ind, i })))
+      .filter(({ pane }) => prime || Math.floor(clock / TF_MS[pane.tf]) > Math.floor(previousClock / TF_MS[pane.tf]));
+    if (!active.length) return null;
+    const days = feed.days();
+    const series = { '5m': feed.bars('5m'), '15m': feed.bars('15m'), '1h': feed.bars('1h'), '4h': feed.bars('4h') };
+    for (const { pane, ind, i } of active) {
+      const key = `${i}|${pane.tf}|${ind.uid}|${JSON.stringify(ind.params)}`;
+      let watcher = setupWatchers.get(key);
+      const newWatcher = !watcher;
+      if (!watcher) {
+        watcher = { engine: isGoldId(ind.id) ? createGoldSetupEngine(pane.tf, ind.params, ind.id as ParcaId) : createSetupEngine(pane.tf, ind.params), lastSignalAt: -Infinity };
+        setupWatchers.set(key, watcher);
+      }
+      const result = watcher.engine({ bars: feed.bars(pane.tf), clock, days, series });
+      const signal = [...result.marks].reverse().find((mark) => mark.kind === 'signal');
+      if (!signal) continue;
+      const previous = watcher.lastSignalAt;
+      watcher.lastSignalAt = signal.t;
+      if (!prime && !newWatcher && signal.t > previous && signal.t + TF_MS[pane.tf] > previousClock && signal.t + TF_MS[pane.tf] <= clock) return { mark: signal, id: ind.id as ParcaId };
+    }
+    return null;
+  };
   // pending screenshot jobs, executed after the chart has drawn the new bar
   const shotJobs: { kind: 'open' | 'close'; posId?: string; tradeId?: string }[] = [];
   const runShots = () => {
@@ -410,8 +471,7 @@ export const useApp = create<State>((set, get) => {
     const price = feed.price;
     const sp = spreadOf(get().settings);
     const floating = s.positions.reduce((acc, p) => acc + pnlOf(p.side, p.entry, markPrice(p.side, price, sp), p.lots), 0);
-    const entryFees = s.positions.reduce((fee, p) => fee + p.entry * p.lots * CONTRACT * (a.rules.commissionPct ?? 0) / 100, 0);
-    const equity = a.balance + floating - entryFees;
+    const equity = equityAt(a.balance, s.positions, price, sp, a.rules.commissionPct ?? 0);
     return {
       price,
       clock: feed.clock,
@@ -425,8 +485,7 @@ export const useApp = create<State>((set, get) => {
   const closePos = (p: Position, exit: number, reason: CloseReason, at: number) => {
     const s = get().session!;
     const a = account()!;
-    const commission = (((p.entry + exit) * p.lots * CONTRACT) * (a.rules.commissionPct ?? 0)) / 100;
-    const pnl = pnlOf(p.side, p.entry, exit, p.lots) - commission;
+    const pnl = tradePnl(p, exit, a.rules.commissionPct ?? 0);
     const risk = riskOf(p.entry, p.initialSl, p.lots);
     const dk = `${s.id}:${propDay(at - 60_000)}`;
     a.dayPnl = { ...(a.dayPnl ?? {}), [dk]: (a.dayPnl?.[dk] ?? 0) + pnl };
@@ -489,6 +548,34 @@ export const useApp = create<State>((set, get) => {
     return p;
   };
 
+  const flagViolation = (a: Account, s: SessionRec, breach: { floor: 'day' | 'max'; equity: number; limit: number; crossing?: boolean }) => {
+    s.orders = [];
+    a.status = 'violated';
+    a.violatedAt = Date.now();
+    const daily = breach.floor === 'day';
+    const rule = daily ? `Günlük zarar limiti (%${a.rules.dailyLoss})` : `Toplam zarar limiti (%${a.rules.maxLoss})`;
+    a.violation = breach.crossing ? `${rule} mum içi senaryoda aşıldı.` :
+      `${rule} ${money0(breach.limit - breach.equity)} aşıldı.`;
+    saveAccount(a);
+    play('violation');
+  };
+
+  /** A manual action changes equity at the already visible quote, without replaying its candle. */
+  const checkAtQuote = (a: Account, s: SessionRec) => {
+    if (!feed) return false;
+    const bid = feed.price;
+    const spread = spreadOf(get().settings);
+    const equity = equityAt(a.balance, s.positions, bid, spread, a.rules.commissionPct ?? 0);
+    const live = computeLive();
+    set({ live: { ...live, worstEquity: Math.min(live.worstEquity, equity) } });
+    const { dayFloor, maxFloor } = accountLimits(a, s);
+    const limit = Math.max(dayFloor, maxFloor);
+    if (equity >= limit - 1e-8) return false;
+    for (const p of [...s.positions]) closePos(p, markPrice(p.side, bid, spread), 'violation', feed.clock);
+    flagViolation(a, s, { floor: dayFloor >= maxFloor ? 'day' : 'max', equity, limit });
+    return true;
+  };
+
   /** Process one revealed minute: fills, exits, day roll, rules. Returns false when the session ended. */
   const processMinute = (): boolean => {
     if (!feed) return false;
@@ -502,52 +589,43 @@ export const useApp = create<State>((set, get) => {
     // day roll
     const dk = propDay(m.t);
     if (dk !== s.dayKey) {
-      const floating = s.positions.reduce((acc, p) => acc + pnlOf(p.side, p.entry, markPrice(p.side, m.o, sp), p.lots), 0);
+      const openingEquity = equityAt(a.balance, s.positions, m.o, sp, a.rules.commissionPct ?? 0);
       s.dayKey = dk;
-      s.dayStartEquity = a.rules.dailyBase === 'balance' ? a.balance : Math.max(a.balance, a.balance + floating);
+      s.dayStartEquity = a.rules.dailyBase === 'balance' ? a.balance : Math.max(a.balance, openingEquity);
       warned = { day: false, max: false };
     }
     s.high = Math.max(s.high ?? m.h, m.h);
     s.low = Math.min(s.low ?? m.l, m.l);
     s.lastPrice = m.c;
 
-    // pending orders
-    const filled = new Map<string, boolean>();
-    for (const o of [...s.orders]) {
-      const fill = pendingFill(o, m, sp);
-      if (fill !== undefined) {
-        s.orders = s.orders.filter((x) => x.id !== o.id);
-        const p = openPos(o.side, o.lots, fill, o.sl, o.tp, o.type, at);
-        p.openedAt = m.t;
-        filled.set(p.id, fill === entryPrice(o.side, m.o, sp));
-        if (get().editing?.id === o.id) set({ editing: { kind: 'pos', id: p.id } });
-      }
-    }
-
-    // exits: stop first when both are touched inside one minute (conservative)
-    for (const p of [...s.positions]) {
-      if (p.openedAt === m.t && !filled.has(p.id)) continue;
-      const exit = positionExit(p, m, filled.has(p.id), filled.get(p.id) ?? false, sp);
-      if (exit) closePos(p, exit.price, exit.reason, at);
-    }
-
-    // rules on worst intrabar equity
-    const entryFees = s.positions.reduce((fee, p) => fee + p.entry * p.lots * CONTRACT * (a.rules.commissionPct ?? 0) / 100, 0);
-    const worst = worstEquity(a.balance - entryFees, s.positions, m, sp);
     const lim = accountLimits(a, s);
+    const outcome = conservativeCandle({
+      balance: a.balance, peak: a.peak ?? a.size, positions: s.positions, orders: s.orders,
+      spread: sp, commissionPct: a.rules.commissionPct ?? 0, leverage: a.rules.goldLeverage ?? GOLD_LEVERAGE,
+      dayFloor: lim.dayFloor, maxFloor: peak => maximumLossFloor(a, peak),
+    }, m);
+    const filled = new Map<string, Position>();
+    for (const event of outcome.events) {
+      if (event.kind === 'exit') {
+        const p = filled.get(event.id) ?? s.positions.find(p => p.id === event.id);
+        if (p) closePos(p, event.price, event.reason, at);
+        continue;
+      }
+      const { order } = event;
+      s.orders = s.orders.filter(o => o.id !== order.id);
+      if (event.kind === 'cancel') {
+        get().showToast(`Emir iptal: ${a.rules.goldLeverage ?? GOLD_LEVERAGE}× kaldıraçta kullanılabilir miktar ${event.allowed.toFixed(2)} lot.`, 'warn');
+        continue;
+      }
+      const p = openPos(order.side, order.lots, event.price, order.sl, order.tp, order.type, m.t);
+      filled.set(order.id, p);
+      if (get().editing?.id === order.id) set({ editing: { kind: 'pos', id: p.id } });
+    }
+    const { worst, breach } = outcome;
     const live = get().live;
     set({ live: { ...live, worstEquity: Math.min(live.worstEquity, worst) } });
-    let breach: string | null = null;
-    if (worst < lim.dayFloor) breach = `Günlük zarar limiti ${money0(lim.dayFloor - worst)} aşıldı (%${a.rules.dailyLoss}).`;
-    else if (worst < lim.maxFloor) breach = `Toplam zarar limiti ${money0(lim.maxFloor - worst)} aşıldı (%${a.rules.maxLoss}).`;
     if (breach) {
-      for (const p of [...s.positions]) closePos(p, markPrice(p.side, m.c, sp), 'violation', at);
-      s.orders = [];
-      a.status = 'violated';
-      a.violatedAt = Date.now();
-      a.violation = breach;
-      saveAccount(a);
-      play('violation');
+      flagViolation(a, s, breach);
       get().endSession('violation');
       return false;
     }
@@ -620,6 +698,7 @@ export const useApp = create<State>((set, get) => {
     loading: null,
     live: { price: 0, clock: 0, equity: 0, floating: 0, dayLoss: 0, worstEquity: Infinity },
     playing: false,
+    seekingSignal: false,
     dataWait: false,
     tool: 'cursor',
     ticket: null,
@@ -690,7 +769,7 @@ export const useApp = create<State>((set, get) => {
     },
 
     go(view) {
-      if (view !== 'trade') get().setPlaying(false);
+      if (view !== 'trade') { get().setPlaying(false); get().stopSignalSeek(); }
       set({ view });
       try {
         localStorage.setItem('s2c:view', view);
@@ -737,13 +816,38 @@ export const useApp = create<State>((set, get) => {
         step: 0,
         programId: prog?.id ?? 'custom',
         programName: prog?.name ?? 'Özel program',
-        fee: prog ? salePrice(prog.prices[size] ?? 0) : 0,
+        fee: prog ? salePrice(prog.prices[size] ?? 0, prog.discount) : 0,
         dayPnl: {},
       };
       await db.putAccount(a);
       set({ accounts: [a, ...get().accounts] });
       play('place');
       await get().startSession(a.id);
+    },
+
+    async resetAllAccounts() {
+      get().setPlaying(false);
+      get().stopSignalSeek();
+      cancelAnimationFrame(playRaf);
+      await db.clearAllAccountData();
+      feed = null;
+      setupWatchers.clear();
+      set({
+        accounts: [],
+        sessions: [],
+        trades: [],
+        session: null,
+        sessionTrades: [],
+        ticket: null,
+        editing: null,
+        loading: null,
+        live: { price: 0, clock: 0, equity: 0, floating: 0, dayLoss: 0, worstEquity: Infinity },
+        overlay: null,
+        notices: [],
+        replayTradeId: null,
+        journalTradeId: null,
+      });
+      marketBus.emit('reset');
     },
 
     async startSession(accountId) {
@@ -769,7 +873,7 @@ export const useApp = create<State>((set, get) => {
           dayKey: propDay(start),
         };
       }
-      set({ view: 'trade', loading: { progress: 0, accountId }, session: null, ticket: null, tool: 'cursor', playing: false, showPrice: false });
+      set({ view: 'trade', loading: { progress: 0, accountId }, session: null, ticket: null, tool: 'cursor', playing: false, seekingSignal: false, showPrice: false });
       try {
         localStorage.setItem('s2c:view', 'trade');
       } catch {
@@ -806,10 +910,12 @@ export const useApp = create<State>((set, get) => {
       get().setPlaying(false);
       if (!s || !a || !feed) return;
       if (reason === 'user' || reason === 'data') {
+        if (checkAtQuote(a, s)) reason = 'violation';
         for (const p of [...s.positions]) closePos(p, markPrice(p.side, feed.price, spreadOf(get().settings)), 'session', feed.clock);
         s.orders = [];
         saveAccount(a);
-        if (tryPass()) return;
+        if (reason !== 'violation' && checkAtQuote(a, s)) reason = 'violation';
+        if (reason !== 'violation' && tryPass()) return;
       }
       s.clockMs = feed.clock;
       s.endedAt = Date.now();
@@ -839,7 +945,7 @@ export const useApp = create<State>((set, get) => {
 
     async advanceToDayEnd() {
       const initial = get().session;
-      if (!initial || !feed || get().playing || get().dataWait) return;
+      if (!initial || !feed || get().playing || get().seekingSignal || get().dataWait) return;
       const dayKey = initial.dayKey;
       let revealed = 0;
       set({ dataWait: true });
@@ -878,6 +984,49 @@ export const useApp = create<State>((set, get) => {
         get().showToast('Gün sonuna ulaşmak için daha fazla piyasa verisi gerekiyor.', 'warn');
     },
 
+    async advanceToNextSignal() {
+      const initial = get().session;
+      if (!initial || !feed || get().playing || get().seekingSignal || get().dataWait) return;
+      setupWatchers.clear();
+      scanSetupSignals(true);
+      set({ seekingSignal: true });
+      let revealed = 0;
+      let found = false;
+      let reason = 'Bir haftalık veride yeni Parça sinyali bulunamadı.';
+      for (let i = 0; i < 7 * 24 * 60; i++) {
+        if (!get().seekingSignal || get().session?.id !== initial.id || !feed) break;
+        if (!feed.step()) {
+          if (feed.loadError) { reason = 'Piyasa verisi yüklenemedi; sinyal araması durdu.'; break; }
+          if (feed.isLoading) { await feed.waitForLoading(); continue; }
+          if (feed.exhausted) { reason = 'Tarihsel verinin sonuna ulaşıldı.'; break; }
+          continue;
+        }
+        revealed++;
+        if (!processMinute()) break;
+        const hit = scanSetupSignals();
+        if (hit) {
+          found = true;
+          if (get().session?.id === initial.id) afterSteps(revealed);
+          revealed = 0;
+          get().showToast(`Parça ${parcaName(hit.id)} ${hit.mark.side === 'long' ? 'AL' : 'SAT'} sinyali bulundu; işlem açabilirsin.`);
+          break;
+        }
+        if (revealed >= 240) {
+          afterSteps(revealed);
+          revealed = 0;
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
+      if (revealed && get().session?.id === initial.id) afterSteps(revealed);
+      const cancelled = !get().seekingSignal;
+      set({ seekingSignal: false });
+      if (!found && !cancelled && get().session?.id === initial.id) get().showToast(reason, 'warn');
+    },
+
+    stopSignalSeek() {
+      if (get().seekingSignal) set({ seekingSignal: false });
+    },
+
     stepMinutes(n) {
       if (!feed || !get().session) return;
       let revealed = 0;
@@ -902,6 +1051,7 @@ export const useApp = create<State>((set, get) => {
       if (!feed || !get().session) return;
       const ms = TF_MS[mainTf(get().prefs)];
       let revealed = 0;
+      let signal: { mark: SetupMark; id: ParcaId } | null = null;
       for (let guard = 0; guard < 2000; guard++) {
         if (!feed.step()) {
           if (feed.loadError) { feed.loadError = false; get().setPlaying(false); get().showToast('Veri yüklenemedi. Sonraki mum düğmesiyle tekrar deneyebilirsin.', 'warn'); }
@@ -914,6 +1064,10 @@ export const useApp = create<State>((set, get) => {
         }
         revealed++;
         if (!processMinute()) return;
+        if (get().playing) {
+          signal = scanSetupSignals();
+          if (signal) break;
+        }
         const next = feed.minutes[feed.ci + 1];
         if (!next || Math.floor(next.t / ms) !== Math.floor(feed.current.t / ms)) break;
       }
@@ -925,26 +1079,35 @@ export const useApp = create<State>((set, get) => {
         }
       }
       afterSteps(revealed);
+      if (signal) {
+        get().setPlaying(false);
+        get().showToast(`Parça ${parcaName(signal.id)} ${signal.mark.side === 'long' ? 'AL' : 'SAT'} sinyali${signal.mark.prob !== undefined ? ` (1R olasılığı %${Math.round(signal.mark.prob * 100)})` : ''}: oynatma durdu. İşlemi sağ panelden açabilirsin.`);
+      }
     },
 
     setPlaying(p) {
       cancelAnimationFrame(playRaf);
+      if (p) get().stopSignalSeek();
       set({ playing: p });
       if (!p) {
         flushSession();
         return;
       }
+      setupWatchers.clear();
+      scanSetupSignals(true);
       let last = performance.now();
       let acc = 0;
       const loop = (now: number) => {
         if (!get().playing) return;
         const dt = Math.min(0.25, (now - last) / 1000);
         last = now;
-        acc += dt * SPEEDS[get().prefs.speed];
+        const speed = SPEEDS[get().prefs.speed] ?? 1;
+        acc += dt * (mainTf(get().prefs) === '1m' ? Math.min(speed, 4) : speed);
         let guard = 0;
         while (acc >= 1 && guard++ < 64) {
           acc -= 1;
           get().stepBar();
+          if (!get().playing) return;
           if (!get().session || get().overlay?.kind === 'violation' || get().overlay?.kind === 'funded' || get().overlay?.kind === 'step') {
             set({ playing: false });
             return;
@@ -962,8 +1125,10 @@ export const useApp = create<State>((set, get) => {
     },
 
     setPane(i, p) {
+      if (get().playing && (p.tf || p.ind)) get().setPlaying(false);
+      if (get().seekingSignal && (p.tf || p.ind)) get().stopSignalSeek();
       const panes = get().prefs.panes.map((x, j) => (j === i ? { ...x, ...p } : x));
-      get().setPrefs({ panes });
+      get().setPrefs({ panes, ...(i === 0 && p.tf === '1m' && get().prefs.panes[0].tf !== '1m' ? { speed: 1 } : {}) });
     },
 
     setShowPrice(v) {
@@ -986,7 +1151,7 @@ export const useApp = create<State>((set, get) => {
       const dist = defaultDistance();
       const t: Ticket = {
         side,
-        type: type === 'market' ? 'market' : deriveType(side, e, price),
+        type: type === 'market' ? 'market' : deriveType(side, e, price, spreadOf(get().settings)),
         entry: e,
         sl: lastTicket.withSl ? e - dir(side) * dist : undefined,
         tp: lastTicket.withTp ? e + dir(side) * dist * 2 : undefined,
@@ -1009,7 +1174,7 @@ export const useApp = create<State>((set, get) => {
         next.entry = base;
         if (t.sl !== undefined) next.sl = base - (t.sl - base);
         if (t.tp !== undefined) next.tp = base - (t.tp - base);
-        if (next.type !== 'market' && feed) next.type = deriveType(next.side, next.entry, feed.price);
+        if (next.type !== 'market' && feed) next.type = deriveType(next.side, next.entry, feed.price, spreadOf(get().settings));
       }
       set({ ticket: next });
     },
@@ -1018,23 +1183,31 @@ export const useApp = create<State>((set, get) => {
       const t = get().ticket;
       const s = get().session;
       const a = account();
-      if (!t || !s || !a || !feed) return;
+      if (!t || !s || !a || !feed || s.endedAt || a.status !== 'active') return;
       const live = feed.price;
       // a market buy pays the ask
       const fill = entryPrice(t.side, live, spreadOf(get().settings));
-      const lotsN = ticketLots(t, a.balance, t.type === 'market' ? fill : t.entry);
+      const orderPrice = t.type === 'market' ? fill : t.entry;
+      const lotsN = ticketLots(t, a.balance, orderPrice);
+      const maxLots = availableGoldLots(a, s, orderPrice);
+      if (lotsN > maxLots) {
+        get().showToast(`Lot fazla: bu bakiye ve ${a.rules.goldLeverage ?? GOLD_LEVERAGE}× kaldıraçla en çok ${maxLots.toFixed(2)} lot açabilirsin.`, 'warn');
+        return;
+      }
       if (!Number.isFinite(lotsN) || lotsN < MIN_LOT) {
         get().showToast('Risk bütçesi 0,01 lot için yetersiz.', 'warn');
         return;
       }
       if (t.type === 'market') {
         const long = t.side === 'long';
+        const quote = markPrice(t.side, live, spreadOf(get().settings));
         // a level the price has already crossed would fire at once: drop it and say so
-        const sl = t.sl !== undefined && (long ? t.sl < live : t.sl > live) ? t.sl : undefined;
-        const tp = t.tp !== undefined && (long ? t.tp > live : t.tp < live) ? t.tp : undefined;
+        const sl = t.sl !== undefined && (long ? t.sl < quote : t.sl > quote) ? t.sl : undefined;
+        const tp = t.tp !== undefined && (long ? t.tp > quote : t.tp < quote) ? t.tp : undefined;
         if (t.sl !== undefined && sl === undefined) get().showToast('SL fiyatın öbür tarafında kaldığı için konmadı.', 'warn');
         if (t.tp !== undefined && tp === undefined) get().showToast('TP fiyatın öbür tarafında kaldığı için konmadı.', 'warn');
         openPos(t.side, lotsN, fill, sl, tp, 'market', feed.current.t);
+        if (checkAtQuote(a, s)) { void get().endSession('violation'); return; }
         runShots();
       } else {
         const type = deriveType(t.side, t.entry, feed.price);
@@ -1059,7 +1232,10 @@ export const useApp = create<State>((set, get) => {
       const s = get().session;
       const o = s?.orders.find((x) => x.id === id);
       if (!s || !o) return;
-      o.lots = roundLots(lots);
+      const allowed = availableGoldLots(account()!, s, o.price, o.id);
+      const nextLots = Math.min(roundLots(lots), allowed);
+      if (nextLots < MIN_LOT) { get().showToast(`Bu emir için ${account()!.rules.goldLeverage ?? GOLD_LEVERAGE}× kaldıraçta kullanılabilir bakiye yok.`, 'warn'); return; }
+      o.lots = nextLots;
       set({ session: { ...s } });
       persistSession(s);
     },
@@ -1078,10 +1254,13 @@ export const useApp = create<State>((set, get) => {
       if (get().editing?.id === id) set({ editing: null });
       const s = get().session;
       const p = s?.positions.find((x) => x.id === id);
-      if (!s || !p || !feed) return;
+      const a = account();
+      if (!s || !a || !p || !feed || s.endedAt || a.status !== 'active') return;
+      if (checkAtQuote(a, s)) { void get().endSession('violation'); return; }
       closePos(p, markPrice(p.side, feed.price, spreadOf(get().settings)), 'manual', feed.clock);
       play('cancel');
-      saveAccount(account()!);
+      saveAccount(a);
+      if (checkAtQuote(a, s)) { void get().endSession('violation'); return; }
       set({ session: { ...s }, live: computeLive() });
       runShots();
       persistSession(s, true);
@@ -1102,7 +1281,7 @@ export const useApp = create<State>((set, get) => {
           next.entry = price;
           if (t.sl !== undefined) next.sl = t.sl + d;
           if (t.tp !== undefined) next.tp = t.tp + d;
-          next.type = deriveType(t.side, price, cur);
+          next.type = deriveType(t.side, price, cur, spreadOf(get().settings));
         } else if (target.field === 'sl') {
           next.sl = t.side === 'long' ? Math.min(price, t.entry - 0.01) : Math.max(price, t.entry + 0.01);
         } else {
@@ -1119,15 +1298,16 @@ export const useApp = create<State>((set, get) => {
           o.price = price;
           if (o.sl !== undefined) o.sl += d;
           if (o.tp !== undefined) o.tp += d;
-          o.type = deriveType(o.side, price, cur);
+          o.type = deriveType(o.side, price, cur, spreadOf(get().settings));
         } else if (target.field === 'sl') o.sl = o.side === 'long' ? Math.min(price, o.price - 0.01) : Math.max(price, o.price + 0.01);
         else o.tp = o.side === 'long' ? Math.max(price, o.price + 0.01) : Math.min(price, o.price - 0.01);
       } else {
         const p = s.positions.find((x) => x.id === target.id);
         if (!p) return;
-        // a stop can trail past entry, but never through the current price
-        if (target.field === 'sl') p.sl = p.side === 'long' ? Math.min(price, cur - 0.01) : Math.max(price, cur + 0.01);
-        else if (target.field === 'tp') p.tp = p.side === 'long' ? Math.max(price, cur + 0.01) : Math.min(price, cur - 0.01);
+        // A stop may trail past entry but stays beyond the executable quote.
+        const quote = markPrice(p.side, cur, spreadOf(get().settings));
+        if (target.field === 'sl') p.sl = p.side === 'long' ? Math.min(price, quote - 0.01) : Math.max(price, quote + 0.01);
+        else if (target.field === 'tp') p.tp = p.side === 'long' ? Math.max(price, quote + 0.01) : Math.min(price, quote - 0.01);
         if (!p.riskLocked && p.sl !== undefined) p.initialSl = p.sl;
       }
       set({ session: { ...s } });
@@ -1244,7 +1424,7 @@ export const useApp = create<State>((set, get) => {
         return;
       }
       const gross = a.balance - a.size - lim.buffer;
-      const amount = payoutNet(gross, a.rules.split, a.rules.payoutFeePct ?? 0);
+      const amount = payoutNet(gross, splitFor(a.rules, a.payouts.length), a.rules.payoutFeePct ?? 0);
       a.payouts = [...a.payouts, { id: uid(), accountId: a.id, gross, amount, at: Date.now() }];
       a.balance = a.size + lim.buffer;
       a.payoutDays = [];

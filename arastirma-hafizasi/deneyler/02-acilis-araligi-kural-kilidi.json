@@ -1,0 +1,12 @@
+{
+  "scripts/research/run.mjs": "113e9f9167aee1af632037aabd12c13485908c3f6539ef719821cac8e72d3c08",
+  "scripts/research/data.mjs": "f463277d2171820fbef2edfab564216bc18b11ca3367f961768813aebf1b122e",
+  "scripts/research/s2c.ts": "816ae717eeae257c7b572890a796dba77cfd79db7a100b682c02da240ab8bfdf",
+  "src/lib/execution.ts": "0cd8a681abcf6a5d034f4211b0a92d3fe69ce7c80aae560dc359d654c15de1c8",
+  "src/lib/programs.ts": "65be69e69f9873abe11a32035ad6c775855250a74541d984a291d56e601dd24a",
+  "src/lib/types.ts": "a4014cb548ee292a31a441ed698c756acf44745fa6007d55b48f2f55502744ed",
+  "src/lib/accountRules.ts": "2e6c08265958cbfd1277fb68f99c4196e5b83da3ee3031a7fdc6f716adcda82d",
+  "arastirma-hafizasi/deneyler/donem-kaydi.md": "81dd918903261f9151fba10317f3aa08be12ab19decd9766b183d274e2efc86c",
+  "scripts/research/opening.mjs": "55818a789ab48df32e367e8aa3938a501854dee082de991d2c635849f6d1005f",
+  "arastirma-hafizasi/deneyler/02-acilis-araligi-protokol.md": "0c14657da8dd9af33a0e167f41f2d69beee1d7a29cec39a37736ae7adb9990e8"
+}

@@ -1,5 +1,7 @@
 import { Bar } from './types';
 import { DayBar, dayStart } from './market';
+import { GOLD_A_SETUP_DEFAULTS, GOLD_SETUP_DEFAULTS, PARCA_CLASSIC_ID, PARCA_GOLD_A_ID, PARCA_GOLD_ID, PARCA_TRAINED_1M_ID } from './parcaVariants';
+import type { SetupParams } from './parcaSetup';
 
 type A = number[];
 const N = NaN;
@@ -197,15 +199,45 @@ function dmi(bars: Bar[], len: number, adxLen: number) {
   return { plus, minus, adx: rma(dx, adxLen) };
 }
 
+function goldDef(id: string, name: string, short: string, d: SetupParams): IndDef {
+  return {
+    id, name, short, cat: 'Özel stratejiler', pane: 'overlay',
+    params: [
+      P('pivot', 'Mini yapı mum sayısı', d.pivot, 1, 1, 8),
+      P('window', 'Engulf sonrası teyit mumu', d.window, 1, 1, 30),
+      P('zoneAge', 'Bölge ömrü (mum)', d.zoneAge, 1, 10, 300),
+      P('minGap', 'En küçük FVG (ATR katı)', d.minGap, 0.05, 0, 3),
+      P('biasMode', 'Bias: 1 günlük · 2 karşıt oy yok · 3 üçü aynı · 4 elle YUKARI · 5 elle AŞAĞI · 6 çoğunluk', d.biasMode, 1, 1, 6),
+      P('sweep', 'Likidite: 0 serbest · 1 sweep · 2 sweep veya üst zaman dilimi bölgesi', d.sweep, 1, 0, 2),
+      P('session', 'Seans: 0 hepsi · 1 Londra / New York, haber dışı · 2 hepsi, haber dışı', d.session, 1, 0, 2),
+      P('entry', 'Giriş: 1 engulf + MSP · 2 engulf yeter', d.entry, 1, 1, 2), P('rr', 'Hedef (R katı)', d.rr, 0.5, 0.5, 5),
+      P('ema', 'EMA teyidi (EMA21 eğimi + 15dk EMA50): 0 / 1', d.ema, 1, 0, 1),
+      P('adx', 'En düşük ADX (trend gücü, 0 kapalı)', d.adx, 0.5, 0, 60),
+      P('vol', 'En düşük oynaklık (ATR / günlük ort., 0 kapalı)', d.vol, 0.05, 0, 3),
+      P('minP', 'En düşük 1R olasılığı (0–0,9; 0 kapalı)', d.minP, 0.05, 0, 0.9),
+      P('room', 'Önündeki seviyeye en az kaç R (0 kapalı)', d.room ?? 0, 0.5, 0, 6),
+      P('noOB', 'OB ve 4sa+ iFVG girişlerini atla: 0 / 1', d.noOB ?? 0, 1, 0, 1),
+    ],
+    outputs: [], calc: () => ({}),
+  };
+}
+
 export const INDICATORS: IndDef[] = [
   {
-    id: 'parca-setup', name: 'Parça Setup · Bias / Engulf / MSP', short: 'PARÇA', cat: 'Özel stratejiler', pane: 'overlay',
+    id: PARCA_CLASSIC_ID, name: 'Parça Klasik · AL / SAT', short: 'KLASİK', cat: 'Özel stratejiler', pane: 'overlay',
     params: [
-      P('pivot', 'Mini yapı mum sayısı', 2, 1, 1, 8), P('window', 'Engulf sonrası teyit mumu', 8, 1, 1, 30), P('zoneAge', 'Bölge ömrü (mum)', 80, 1, 10, 300),
-      P('minGap', 'En küçük FVG (ATR katı)', 0.3, 0.05, 0, 3), P('biasMode', 'Bias: 1 günlük · 2 oylama', 1, 1, 1, 2), P('sweep', 'Likidite süpürmesi şart: 0 / 1', 0, 1, 0, 1),
+      P('pivot', 'Mini yapı mum sayısı', 2, 1, 1, 8), P('window', 'Engulf sonrası teyit mumu', 10, 1, 1, 30), P('zoneAge', 'Bölge ömrü (mum)', 80, 1, 10, 300),
+      P('minGap', 'En küçük FVG (ATR katı)', 0.25, 0.05, 0, 3), P('biasMode', 'Bias: 1 günlük · 2 karşıt oy yok · 3 üçü aynı · 4 elle YUKARI · 5 elle AŞAĞI · 6 çoğunluk', 2, 1, 1, 6), P('sweep', 'Likidite: 0 serbest · 1 sweep · 2 sweep veya üst zaman dilimi bölgesi', 0, 1, 0, 2),
+      P('session', 'Seans: 0 hepsi · 1 Londra / New York, haber dışı · 2 hepsi, haber dışı', 1, 1, 0, 2),
+      P('entry', 'Giriş: 1 engulf + MSP · 2 engulf yeter', 1, 1, 1, 2), P('rr', 'Hedef (R katı)', 1, 0.5, 0.5, 5),
+      P('ema', 'EMA teyidi (EMA21 eğimi + 15dk EMA50): 0 / 1', 0, 1, 0, 1),
+      P('adx', 'En düşük ADX (trend gücü, 0 kapalı)', 0, 0.5, 0, 60), P('vol', 'En düşük oynaklık (ATR / günlük ort., 0 kapalı)', 0, 0.05, 0, 3),
     ],
     outputs: [], calc: () => ({}),
   },
+  goldDef(PARCA_GOLD_ID, 'Parça Gold · AL / SAT', 'GOLD', GOLD_SETUP_DEFAULTS),
+  goldDef(PARCA_GOLD_A_ID, 'Parça Gold A+ · olasılık %55+', 'GOLD A+', GOLD_A_SETUP_DEFAULTS),
+  { id: PARCA_TRAINED_1M_ID, name: 'Parça 1dk Deneysel · eğitimli filtre', short: '1DK DENEYSEL', cat: 'Özel stratejiler', pane: 'overlay', params: [], outputs: [], calc: () => ({}) },
   // Moving averages
   MA('sma', 'Basit hareketli ortalama', 'SMA', (c, n) => sma(c, n)),
   MA('ema', 'Üssel hareketli ortalama', 'EMA', (c, n) => ema(c, n)),

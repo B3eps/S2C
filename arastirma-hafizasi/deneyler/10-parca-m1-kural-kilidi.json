@@ -1,0 +1,20 @@
+{
+  "forwardPeriod": [
+    "2026-11-20",
+    "2027-02-01",
+    []
+  ],
+  "primary": "fvg-retest",
+  "fingerprints": {
+    "scripts/research/run.mjs": "113e9f9167aee1af632037aabd12c13485908c3f6539ef719821cac8e72d3c08",
+    "scripts/research/data.mjs": "f463277d2171820fbef2edfab564216bc18b11ca3367f961768813aebf1b122e",
+    "scripts/research/s2c.ts": "816ae717eeae257c7b572890a796dba77cfd79db7a100b682c02da240ab8bfdf",
+    "src/lib/execution.ts": "0cd8a681abcf6a5d034f4211b0a92d3fe69ce7c80aae560dc359d654c15de1c8",
+    "src/lib/programs.ts": "65be69e69f9873abe11a32035ad6c775855250a74541d984a291d56e601dd24a",
+    "src/lib/types.ts": "a4014cb548ee292a31a441ed698c756acf44745fa6007d55b48f2f55502744ed",
+    "src/lib/accountRules.ts": "2e6c08265958cbfd1277fb68f99c4196e5b83da3ee3031a7fdc6f716adcda82d",
+    "scripts/research/run-parca-m1.mjs": "44df60d0d8f7e42e1efc4bfff61aeed3abdadf26f8441c6922a97df512937fbd",
+    "scripts/research/parca-m1-rules.mjs": "814646671a83ebfe22fe8216ec7425d3026894579d44bed21f70927c0854c184",
+    "arastirma-hafizasi/deneyler/10-parca-m1-protokol.md": "cdced3d8f6cace8716b0825c9399678a1dbb7700781a7769977eeee7c175e958"
+  }
+}

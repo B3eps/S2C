@@ -22,15 +22,16 @@ export function Settings() {
   const activeSetupId = useApp((s) => s.activeSetupId);
   const createSetup = useApp((s) => s.createSetup);
   const switchSetup = useApp((s) => s.switchSetup);
+  const resetAllAccounts = useApp((s) => s.resetAllAccounts);
   const activeSetup = setups.find((x) => x.id === activeSetupId);
   const [rules, setRules] = useState<Rules>(settings.rules);
   const [setupName, setSetupName] = useState('');
   const [setupNote, setSetupNote] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
   const [confirmImport, setConfirmImport] = useState<{ file: File; accounts: number; trades: number; sessions: number } | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const dirty = JSON.stringify(rules) !== JSON.stringify(settings.rules);
-
   const doExport = async () => {
     const blob = await exportBackup();
     const a = document.createElement('a');
@@ -225,6 +226,27 @@ export function Settings() {
               </div>
             )}
             {msg && <div className="hint-line">{msg}</div>}
+          </div>
+        </section>
+        <section className="panel">
+          <div className="panel-head"><h2>Tüm hesapları sıfırla</h2></div>
+          <div className="panel-body" style={{ display: 'grid', gap: 12 }}>
+            <p className="muted">Tüm çalışma alanlarındaki hesaplar, arşivdekiler dahil, ve bunlara ait işlem/seans geçmişi silinir. İndikatörler, grafik düzeni ve genel uygulama ayarları korunur.</p>
+            {!confirmReset ? (
+              <div><button className="btn" onClick={() => setConfirmReset(true)}>Tüm hesapları sıfırla…</button></div>
+            ) : (
+              <div className="hint-line warn-c" style={{ alignItems: 'center' }}>
+                <Icon name="warn" size={16} />
+                <span style={{ flex: 1 }}>Arşivdekiler dahil bütün hesaplar, işlemler, seanslar ve ekran görüntüleri kalıcı olarak silinecek. İndikatörlerin ve uygulama ayarların korunacak. Bu işlem geri alınamaz.</span>
+                <button className="btn sm ghost" onClick={() => setConfirmReset(false)}>Vazgeç</button>
+                <button className="btn sm primary" onClick={() => {
+                  void resetAllAccounts().then(() => {
+                    setConfirmReset(false);
+                    setMsg('Tüm hesaplar ve hesap verileri silindi. İndikatörler ile uygulama ayarları korundu.');
+                  }).catch((e: Error) => setMsg(e.message || 'Hesap verileri silinemedi.'));
+                }}>Hepsini sil</button>
+              </div>
+            )}
           </div>
         </section>
       </div>

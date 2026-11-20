@@ -199,23 +199,41 @@ test('Parça: bias aynı anda bütün zaman dilimlerinde aynıdır', () => {
     assert.equal(new Set(b).size, 1, `${back}: ${b}`);
   }
 });
-test('Parça: sinyal engulf mumundan sonra gelir, aynı mumda değil', () => {
-  const marks = setupAt('1m', END).marks;
-  const signals = marks.filter((m) => m.kind === 'signal');
-  assert.ok(signals.length > 0);
-  for (const s of signals) {
-    assert.ok(!marks.some((m) => m.kind === 'engulf' && m.t === s.t), 'aynı mumda engulf ve sinyal');
-    assert.ok(marks.some((m) => m.kind === 'engulf' && m.side === s.side && m.t < s.t && s.t - m.t <= 8 * MINUTE));
-  }
+test('Parça: muhafazakâr bias karşıt oyu veto eder; çoğunluk modu ayrı çalışır', () => {
+  const up = [{ t: 0, end: HOUR, o: 100, h: 101, l: 99, c: 100, v: 1 },
+    { t: HOUR, end: 2 * HOUR, o: 100, h: 103, l: 100, c: 102, v: 1 }];
+  const down = [{ t: 0, o: 100, h: 103, l: 100, c: 102, v: 1 },
+    { t: HOUR, o: 102, h: 101, l: 98, c: 99, v: 1 }];
+  assert.equal(parca.biasAt(5 * HOUR, up, up, down, 2), 0);
+  assert.equal(parca.biasAt(5 * HOUR, up, up, down, 6), 1);
 });
-test('Parça: FVG tepkisi, iFVG ve üst zaman dilimi bölgeleri ayrı ayrı yakalanır', () => {
-  const of = (tf) => new Set(setupAt(tf, END).marks.filter((m) => m.kind === 'engulf').map((m) => m.source));
-  const low = [...of('1m')], own = [...of('15m')];
-  assert.ok(low.some((s) => / FVG$/.test(s)), low.join());
-  assert.ok(low.some((s) => /iFVG$/.test(s)), low.join());
-  // 1dk grafikte bölge yalnızca 15dk ve üstünden gelir; 15dk grafikte kendi bölgesi etiketsizdir
-  assert.ok(low.every((s) => /^(15dk|1sa|4sa) /.test(s)), low.join());
-  assert.ok(own.some((s) => /^(FVG|iFVG|OB)$/.test(s)), own.join());
+test('Parça: sinyal, bias yönünde engulf ile yapı kırılımının pencere içinde buluşmasıdır', () => {
+  const marks = setupAt('1m', END, { session: 0 }).marks;
+  const signals = marks.filter((m) => m.kind === 'signal');
+  assert.ok(signals.length >= 5, 'sentetik veride sinyal bekleniyor');
+  for (const sig of signals) {
+    assert.ok(marks.some((m) => m.kind === 'engulf' && m.side === sig.side && m.t <= sig.t && sig.t - m.t <= 8 * MINUTE), 'engulf yok');
+    const long = sig.side === 'long';
+    assert.ok(long ? sig.stop < sig.entry : sig.stop > sig.entry, 'stop yanlış tarafta');
+    assert.ok(Math.abs((sig.target - sig.entry) - (sig.entry - sig.stop)) < 1e-9, 'ilk hedef 1R olmalı');
+  }
+  // çift teyit: engulf ile yapı kırılımı aynı mumda da olabilir
+  assert.ok(signals.some((sig) => marks.some((m) => m.kind === 'engulf' && m.t === sig.t)));
+});
+test('Parça: engulf, karşı yönlü FVG ya da order block’un içinden kapanıştır', () => {
+  const of = (tf) => [...new Set(setupAt(tf, END, { session: 0 }).marks.filter((m) => m.kind === 'engulf').map((m) => m.source))];
+  const low = of('1m');
+  assert.ok(low.every((x) => /(^| )(iFVG|OB)$/.test(x)), low.join());
+  // 1dk grafikte hem kendi boşlukları hem üst zaman dilimi bölgeleri engulf edilir
+  assert.ok(low.includes('iFVG'), low.join());
+  assert.ok(low.some((x) => /^(5dk|15dk|1sa|4sa) /.test(x)), low.join());
+});
+test('Parça: seans filtresi Asya saatinde sinyal vermez; elle bias yalnız o yönde sinyal verir', () => {
+  const filtered = setupAt('1m', END).marks.filter((m) => m.kind === 'signal');
+  assert.ok(filtered.every((m) => calendar.marketSession(m.t).key !== 'asia'));
+  const longOnly = setupAt('1m', END, { biasMode: 4, session: 0 }).marks.filter((m) => m.kind !== 'sweep');
+  assert.ok(longOnly.length > 0 && longOnly.every((m) => m.side === 'long'));
+  assert.equal(setupAt('5m', END, { biasMode: 5 }).bias, -1);
 });
 test('Parça: mum mum ilerleyen motor, tek geçişle aynı işaretleri verir', () => {
   const engine = parca.createSetupEngine('5m');
@@ -237,4 +255,183 @@ test('pivot noktaları bir önceki tam işlem gününden hesaplanır', () => {
   const out = indicators.IND_BY_ID.pivots.calc(bars, {}, { days });
   assert.equal(out.p.at(-1), (101 + 99 + 100) / 3);
   assert.equal(out.r1.at(-1), 2 * 100 - 99);
+});
+
+test('Parça Gold: hedef 1R; Gold A+ sinyalleri Gold sinyallerinin alt kümesidir; eski ayar taşınır', async () => {
+  const v = await load('src/lib/parcaVariants.ts');
+  const open = { session: 0 };
+  const gold = setupAt('5m', END, { ...v.GOLD_SETUP_DEFAULTS, ...open, adx: 0 }).marks.filter((m) => m.kind === 'signal');
+  assert.ok(gold.length > 0);
+  for (const s of gold) assert.ok(Math.abs((s.target - s.entry) - (s.entry - s.stop)) < 1e-9, 'hedef 1R olmalı');
+  const strict = setupAt('5m', END, { ...v.GOLD_A_SETUP_DEFAULTS, ...open }).marks.filter((m) => m.kind === 'signal').map(markKey);
+  const loose = new Set(setupAt('5m', END, { ...v.GOLD_SETUP_DEFAULTS, ...open, ema: 0 }).marks.filter((m) => m.kind === 'signal').map(markKey));
+  assert.ok(strict.every((k) => loose.has(k)), 'A+ yalnızca Gold sinyallerinden seçer');
+  const scored = setupAt('5m', END, { ...v.GOLD_SETUP_DEFAULTS, ...open, ema: 0 }).marks.filter((m) => m.kind === 'signal');
+  // olasılık, 288 mumluk ATR ortalaması oluştuktan sonra hesaplanır
+  const withProb = scored.filter((m) => m.prob !== undefined);
+  assert.ok(withProb.length > 0 && withProb.every((m) => m.prob > 0 && m.prob < 1), 'Gold sinyallerinin olasılığı var');
+  const aplus = setupAt('5m', END, { ...v.GOLD_A_SETUP_DEFAULTS, ...open }).marks.filter((m) => m.kind === 'signal');
+  assert.ok(aplus.every((m) => m.prob >= 0.55));
+  assert.equal(v.variantParams('parca-setup-gold', { pivot: 3, sweep: 2, entry: 2, ema: 1 }).adx, 20);
+  assert.equal(v.variantParams('parca-setup-gold-a', { adx: 27.5, vol: 1.2 }).minP, 0.55);
+});
+test('1dk eğitimli filtre Gold sinyallerini eler ve başka zaman diliminde sinyal üretmez', async () => {
+  const v = await load('src/lib/parcaVariants.ts');
+  const model = await load('src/lib/parcaModel1m.ts');
+  const params = { ...v.GOLD_SETUP_DEFAULTS, session: 0, adx: 0, room: 0, noOB: 0 };
+  const base = setupAt('1m', END, params).marks.filter((m) => m.kind === 'signal');
+  const selected = setupAt('1m', END, { ...params, trained1m: 1 }).marks.filter((m) => m.kind === 'signal');
+  assert.ok(base.length > 0 && selected.length > 0 && selected.length < base.length);
+  const expected = base.filter((m) => model.trained1mScore(m.source, !!m.strong, m.side, m.t) >= model.TRAINED_1M_THRESHOLD);
+  assert.deepEqual(selected.map(markKey), expected.map(markKey));
+  assert.ok(selected.every((m) => m.prob === undefined), '5dk olasılık modeli bu sürümde gösterilmez');
+  assert.equal(setupAt('5m', END, { ...params, trained1m: 1 }).marks.filter((m) => m.kind === 'signal').length, 0);
+  assert.equal(v.variantParams(v.PARCA_TRAINED_1M_ID, { rr: 5 }).rr, v.GOLD_SETUP_DEFAULTS.rr);
+});
+test('Parça Gold (EMA teyitli): geçmiş işaretler sonradan değişmez, sinyaller EMA yönünde', async () => {
+  const { GOLD_SETUP_DEFAULTS } = await load('src/lib/parcaVariants.ts');
+  const params = { ...GOLD_SETUP_DEFAULTS, session: 0, room: 0, noOB: 0 };
+  const full = setupAt('5m', END, params).marks;
+  const loose = setupAt('5m', END, { ...params, ema: 0 }).marks.filter((m) => m.kind === 'signal');
+  assert.ok(full.filter((m) => m.kind === 'signal').length < loose.length, 'EMA teyidi sinyal elemeli');
+  for (const back of [97, 1300, 4100]) {
+    const clock = END - back * MINUTE;
+    const closedAt = Math.floor(clock / TF_OF['5m']) * TF_OF['5m'];
+    assert.deepEqual(setupAt('5m', clock, params).marks.map(markKey), full.filter((m) => m.t + TF_OF['5m'] <= closedAt).map(markKey));
+  }
+});
+
+test('Parça Gold: önünde yakın seviye varsa ve OB / 4sa+ iFVG bölgesindeyse girmez; bunlar sinyalleri yalnız eler', async () => {
+  const { GOLD_SETUP_DEFAULTS } = await load('src/lib/parcaVariants.ts');
+  const base = { ...GOLD_SETUP_DEFAULTS, session: 0, ema: 0, adx: 0, room: 0, noOB: 0 };
+  const all = setupAt('5m', END, base).marks.filter((m) => m.kind === 'signal');
+  const some = setupAt('5m', END, { ...base, room: 2, noOB: 1 }).marks.filter((m) => m.kind === 'signal');
+  const keys = new Set(all.map(markKey));
+  assert.ok(some.length < all.length, 'filtre sinyal elemeli');
+  assert.ok(some.every((m) => keys.has(markKey(m))), 'filtreli sinyaller alt kümedir');
+  assert.ok(some.every((m) => m.liqR === undefined || m.liqR >= 2), 'önünde 2R içinde seviye olan sinyal kalmamalı');
+  assert.ok(some.every((m) => !/OB/.test(m.source)), 'OB girişi kalmamalı');
+});
+
+test('FTM Infinity: yarı fiyat, 3% statik zarar; Plus: 10% hedef, 5% statik zarar', () => {
+  const inf = programs.PROGRAMS.find((p) => p.id === 'ftm-infinity');
+  const plus = programs.PROGRAMS.find((p) => p.id === 'ftm-infinity-plus');
+  assert.deepEqual([5000, 10000, 20000].map((s) => programs.salePrice(inf.prices[s], inf.discount)), [34, 69, 129]);
+  assert.deepEqual([5000, 10000, 20000].map((s) => programs.salePrice(plus.prices[s], plus.discount)), [39, 79, 149]);
+  assert.equal(inf.rules.maxLoss, 3);
+  assert.equal(plus.rules.maxLoss, 5);
+  assert.equal(plus.rules.target, 10);
+  assert.equal(inf.rules.maxType, 'static');
+});
+test('FTM kâr payı ödeme sayısıyla 80 → 85 → 90 olur; BEM sabit kalır', () => {
+  const r = programs.PROGRAMS.find((p) => p.id === 'ftm-infinity').rules;
+  assert.deepEqual([0, 3, 4, 5, 9].map((n) => programs.splitFor(r, n)), [80, 80, 85, 90, 90]);
+  assert.equal(programs.splitFor(programs.PROGRAMS[0].rules, 7), 80);
+});
+
+const bookPosition = (overrides = {}) => ({ id: 'p', side: 'long', lots: 0.1, entry: 100, openedAt: -60000, orderType: 'market', ...overrides });
+const candleBook = (overrides = {}) => ({
+  balance: 5000, peak: 5000, positions: [bookPosition()], orders: [], spread: 0.2,
+  commissionPct: 0.005, leverage: 10, dayFloor: 4950, maxFloor: () => 4750, ...overrides,
+});
+const near = (actual, wanted) => assert.ok(Math.abs(actual - wanted) < 1e-7, `${actual} ≠ ${wanted}`);
+
+test('TP ile ihlal sırası iki OHLC yolunda ayrışır, ihlal anında tasfiye edilir', () => {
+  const book = candleBook({ positions: [bookPosition({ tp: 108 })] });
+  const high = exec.simulateCandle(book, bar, 'high-first');
+  const low = exec.simulateCandle(book, bar, 'low-first');
+  assert.equal(high.events[0].reason, 'tp');
+  assert.equal(high.breach, undefined);
+  assert.equal(low.breach.floor, 'day');
+  assert.equal(low.breach.crossing, true);
+  near(low.events[0].price, 95.005);
+  assert.deepEqual(exec.conservativeCandle(book, bar), low);
+  assert.deepEqual(exec.conservativeCandle(book, bar), low);
+});
+
+test('stop ihlalden önce geçildiyse stop sonrası dip özkaynağı düşürmez', () => {
+  const book = candleBook({ positions: [bookPosition({ sl: 98 })] });
+  const result = exec.conservativeCandle(book, bar);
+  assert.equal(result.breach, undefined);
+  assert.equal(result.events[0].reason, 'sl');
+  near(result.worst, 4979.901);
+});
+
+test('boşluk açılışında stop ile ihlal aynı anda görünürse önce hesap eşiği değerlendirilir', () => {
+  const book = candleBook({ positions: [bookPosition({ sl: 98 })] });
+  const result = exec.conservativeCandle(book, { ...bar, o: 92 });
+  assert.equal(result.breach.crossing, false);
+  assert.deepEqual(result.events, [{ kind: 'exit', id: 'p', price: 92, reason: 'violation' }]);
+  const stop = exec.conservativeCandle({ ...book, dayFloor: 4900 }, { ...bar, o: 92 });
+  assert.equal(stop.events[0].reason, 'sl');
+  assert.equal(stop.events[0].price, 92);
+});
+
+test('limit girişinden önceki tepe hedefi tetiklemez, giriş sonrasındaki tepe tetikler', () => {
+  const order = { id: 'x', side: 'long', type: 'limit', lots: 0.1, price: 98.2, tp: 108 };
+  const book = candleBook({ positions: [], orders: [order], dayFloor: 4900 });
+  const high = exec.simulateCandle(book, bar, 'high-first');
+  const low = exec.simulateCandle(book, bar, 'low-first');
+  assert.deepEqual(high.events, [{ kind: 'fill', order, price: 98.2 }]);
+  assert.equal(low.events.at(-1).reason, 'tp');
+});
+
+test('short gap emirleri bid ile dolar ve koruma ask ile çalışır', () => {
+  const order = { id: 'x', side: 'short', type: 'stop', lots: 0.1, price: 99, sl: 100.2 };
+  const result = exec.simulateCandle(candleBook({ positions: [], orders: [order] }), { ...bar, o: 98 }, 'high-first');
+  assert.equal(result.events[0].price, 98);
+  near(result.events[1].price, 100.2);
+  assert.equal(result.events[1].reason, 'sl');
+});
+
+test('hedge aynı bid anında değerlenir, kapanan bacak fiyat riskini değiştirir', () => {
+  const short = bookPosition({ id: 's', side: 'short' });
+  const hedge = candleBook({ positions: [bookPosition(), short] });
+  near(exec.conservativeCandle(hedge, bar).worst, 4997.9);
+  const closed = candleBook({ positions: [bookPosition({ tp: 101 }), short] });
+  assert.equal(exec.simulateCandle(closed, bar, 'high-first').breach.floor, 'day');
+  assert.equal(exec.simulateCandle(closed, bar, 'low-first').breach.floor, 'day');
+});
+
+test('çıkış komisyonu eşik üstündeki pozisyonu kapanışta ihlal ettirebilir', () => {
+  const book = candleBook({ dayFloor: 4979.925, positions: [bookPosition({ sl: 98 })] });
+  const result = exec.conservativeCandle(book, bar);
+  assert.equal(result.events[0].reason, 'sl');
+  assert.equal(result.breach.crossing, false);
+  near(result.breach.equity, 4979.901);
+});
+
+test('dolum marjı fiyat boşluğunda tekrar kontrol edilir', () => {
+  const order = { id: 'x', side: 'long', type: 'stop', lots: 0.5, price: 100 };
+  const book = candleBook({ balance: 500, dayFloor: 400, maxFloor: () => 350, positions: [], orders: [order] });
+  const result = exec.conservativeCandle(book, { ...bar, o: 102 });
+  assert.deepEqual(result.events, [{ kind: 'cancel', order, allowed: 0.48 }]);
+});
+
+test('boşluk sayımı hafta sonu ile normal arayı hariç tutar ve uzun kesintiyi görür', () => {
+  const wed = Date.UTC(2026,6,1,21);
+  assert.equal(feedMod.missingQuoteMinutes(wed, wed + HOUR), 0);
+  assert.equal(feedMod.missingQuoteMinutes(wed - MINUTE, wed + HOUR + MINUTE), 2);
+  const friday = Date.UTC(2026,6,3,21);
+  assert.equal(feedMod.missingQuoteMinutes(friday, Date.UTC(2026,6,5,22)), 0);
+  assert.equal(feedMod.missingQuoteMinutes(wed + HOUR, wed + 6 * HOUR), 300);
+});
+
+test('önceki hedef marjı serbest bırakır, daha sonraki stop emri dolabilir', () => {
+  const position = bookPosition({ tp: 104, lots: 0.45 });
+  const order = { id: 'x', side: 'long', type: 'stop', lots: 0.06, price: 105 };
+  const book = candleBook({ balance: 500, peak: 500, dayFloor: 0, maxFloor: () => 0, positions: [position], orders: [order] });
+  const result = exec.simulateCandle(book, { ...bar, l: 98 }, 'high-first');
+  assert.deepEqual(result.events.map(event => event.kind), ['exit', 'fill']);
+  near(result.events[1].price, 105);
+});
+
+test('gerçekleşen hedef trailing tabanı yükseltince kalan pozisyon aynı fiyatta tekrar kontrol edilir', () => {
+  const book = candleBook({ dayFloor: 0, maxFloor: peak => Math.min(5000, peak - 80),
+    positions: [bookPosition({ tp: 108 }), bookPosition({ id: 's', side: 'short' })] });
+  const result = exec.simulateCandle(book, bar, 'high-first');
+  assert.equal(result.breach.floor, 'max');
+  assert.equal(result.breach.crossing, false);
+  assert.deepEqual(result.events.map(event => event.reason), ['tp', 'violation']);
+  near(result.events[1].price, 108.2);
 });

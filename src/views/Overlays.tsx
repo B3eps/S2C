@@ -1,4 +1,5 @@
 import { useApp } from '../store';
+import { splitFor } from '../lib/programs';
 import { Icon } from '../components/Icon';
 import { CertLabel } from '../components/bits';
 import { Emblem } from '../components/Emblem';
@@ -17,7 +18,7 @@ export function Overlays() {
           <Emblem width={120} />
           <div className="moment-title gold">Fonlandın</div>
           <p className="lead">
-            {o.account.no} değerlendirmeyi geçti. Hesap artık fonlu: kurallar aynı, hedef yok. Ödeme eşiğini geçince kârının %{o.account.rules.split}’ini
+            {o.account.no} değerlendirmeyi geçti. Hesap artık fonlu: kurallar aynı, hedef yok. Ödeme eşiğini geçince kârının %{splitFor(o.account.rules, o.account.payouts.length)}’ini
             çekebilirsin.
           </p>
           <CertLabel a={o.account} className="seal-in" />
@@ -72,7 +73,7 @@ export function Overlays() {
         <div className="moment-card">
           <div className="moment-title gold">{money(o.amount)}</div>
           <p className="lead">
-            Brüt kâr {money(o.gross)}, payın %{o.account.rules.split}. Hesap bakiyesi {money(o.account.size)} olarak yenilendi.
+            Brüt kâr {money(o.gross)}, payın %{splitFor(o.account.rules, Math.max(0, o.account.payouts.length - 1))}. Hesap bakiyesi {money(o.account.size)} olarak yenilendi.
           </p>
           <CertLabel a={o.account} className="seal-in" />
           <div className="actions">

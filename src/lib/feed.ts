@@ -1,5 +1,5 @@
 import { Bar, TF, TFS, TF_MS } from './types';
-import { DayBar, dailyBars, isClosed } from './market';
+import { DayBar, dailyBars, isClosed, usDst } from './market';
 
 const MIN = 60_000;
 const DAY = 86_400_000;
@@ -43,7 +43,7 @@ async function fetchCandles(tf: TF, from: number, to: number): Promise<Bar[]> {
       for (const row of raw) {
         if (!Array.isArray(row) || row.length < 6 || !row.every((v) => typeof v === 'number' && Number.isFinite(v))) throw new Error('Geçersiz mum verisi');
         const [t, o, h, l, c, v] = row;
-        if (t < from || t >= to || t <= previous || h < Math.max(o, c, l) || l > Math.min(o, c, h) || v < 0) throw new Error('Mum verisi tutarsız');
+        if (t < from || t >= to || t % TF_MS[tf] !== 0 || t <= previous || h < Math.max(o, c, l) || l > Math.min(o, c, h) || v < 0) throw new Error('Mum verisi tutarsız');
         previous = t;
         if (!isClosed(t)) bars.push({ t, o, h, l, c, v });
       }
@@ -71,6 +71,17 @@ export async function fetchRange(tf: TF, from: number, to: number): Promise<Bar[
     l: Math.min(...tail.map(b => b.l)), c: tail[tail.length - 1].c,
     v: tail.reduce((total, b) => total + b.v, 0),
   });
+}
+
+/** Expected quote minutes, excluding the usual 17:00–18:00 New York maintenance.
+ * Holidays and thin markets can still appear as flagged gaps. */
+export function missingQuoteMinutes(first: number, until: number, stopAt = Infinity): number {
+  let missing = 0;
+  for (let t = first; t < until; t += MIN) {
+    const localHour = new Date(t - (usDst(t) ? 4 : 5) * 3_600_000).getUTCHours();
+    if (!isClosed(t) && localHour !== 17 && ++missing >= stopAt) break;
+  }
+  return missing;
 }
 
 /** Last `count` closed bars that opened before `end`. */
@@ -140,15 +151,18 @@ export class Feed {
 
   private async loadMore(until: number) {
     if (!this.cursor) this.cursor = this.base0;
-    const now = Date.now() - 2 * MIN;
+    const now = Math.floor(Date.now() / MIN) * MIN - 2 * MIN;
     while (this.cursor < until && this.cursor < now) {
       const to = Math.min(this.cursor + 2 * DAY, now);
       const chunk = await fetchCandles('1m', this.cursor, to);
       const last = this.minutes[this.minutes.length - 1];
-      let prev = last;
-      for (const b of chunk) {
-        if (prev && b.t - prev.t > 6 * MIN && b.t - prev.t <= 4 * 3_600_000 && !isClosed(prev.t + MIN) && !isClosed(b.t - MIN)) this.hasGaps = true;
-        prev = b;
+      if (!this.hasGaps) {
+        let expected = this.cursor;
+        for (const b of chunk) {
+          if (missingQuoteMinutes(expected, b.t, 1)) { this.hasGaps = true; break; }
+          expected = b.t + MIN;
+        }
+        if (!this.hasGaps && missingQuoteMinutes(expected, to, 1)) this.hasGaps = true;
       }
       this.minutes.push(...(last ? chunk.filter((b) => b.t > last.t) : chunk));
       this.cursor = to;

@@ -29,6 +29,17 @@ export const store = {
   async putAccount(a: Account) {
     await (await db()).put('accounts', a);
   },
+  async clearAllAccountData() {
+    const d = await db();
+    const tx = d.transaction(['accounts', 'sessions', 'trades', 'shots'], 'readwrite');
+    await Promise.all([
+      tx.objectStore('accounts').clear(),
+      tx.objectStore('sessions').clear(),
+      tx.objectStore('trades').clear(),
+      tx.objectStore('shots').clear(),
+      tx.done,
+    ]);
+  },
   async trades(): Promise<Trade[]> {
     return (await db()).getAll('trades');
   },
