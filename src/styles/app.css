@@ -2551,3 +2551,6 @@ input[type='date']:placeholder-shown {
 .chart-host.on-handle .chart-canvas * { cursor: grab !important; }
 .chart-host.drag-drawing,
 .chart-host.drag-drawing * { cursor: grabbing !important; }
+
+/* account card: instrument of the next session, beside its start button */
+.acct-foot .instrument-pick { width: auto; min-width: 0; max-width: 168px; height: 32px; padding-block: 0; }

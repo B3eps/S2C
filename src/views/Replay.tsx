@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useApp } from '../store';
 import { ChartController } from '../lib/chartController';
 import { fetchRange } from '../lib/feed';
+import { instrumentOf } from '../lib/instruments';
 import { Bar, TF_MS, TF_LABEL } from '../lib/types';
 import { C } from '../lib/theme';
 import { Icon } from '../components/Icon';
@@ -28,7 +29,7 @@ export function Replay() {
     let to = trade.closedAt + 25 * ms;
     // never show beyond what the trader has already seen in a running session
     if (session && !session.endedAt) to = Math.min(to, session.clockMs);
-    fetchRange(trade.tf, from, to)
+    fetchRange(trade.tf, from, to, instrumentOf(trade).id)
       .then((b) => {
         setBars(b);
         const s = Math.max(1, b.findIndex((x) => x.t + ms > trade.openedAt));

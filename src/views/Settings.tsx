@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { useApp } from '../store';
 import { DEFAULT_SPREAD } from '../lib/execution';
+import { INSTRUMENTS } from '../lib/instruments';
 import { exportBackup, importBackup, inspectBackup } from '../lib/db';
 import { DEFAULT_RULES, Rules } from '../lib/types';
 import { play } from '../lib/sound';
@@ -83,10 +84,11 @@ export function Settings() {
         <section className="panel">
           <div className="panel-head"><h2>Veri kaynağı</h2></div>
           <div className="panel-body" style={{ display: 'grid', gap: 10 }}>
-            <p><strong>Dukascopy · XAU/USD · alış (bid) mumları</strong></p>
+            <p><strong>Dukascopy · alış (bid) mumları</strong></p>
+            <p className="muted">{INSTRUMENTS.map((i) => `${i.symbol} (${i.name})`).join(' · ')}. Kripto hafta sonu da işlem görür; altın ve endeksler Cuma 17:00 – Pazar 18:00 (New York) kapalıdır. Spread ayarı altın içindir; diğer enstrümanlar kendi varsayılan spread'ini kullanır.</p>
             <p className="muted">Geçmiş veriler bağlantı üzerinden alınır ve bilgisayarda önbelleğe kaydedilir. Mumlar alış (bid) fiyatıdır; long işlemler satış (ask) fiyatından açılır, short işlemler satış fiyatından kapanır. Kayma hesaba katılmaz.</p>
             <label className="field" style={{ maxWidth: 260 }}>
-              <span>Spread (ask − bid, $)</span>
+              <span>Altın spread (ask − bid, $)</span>
               <input
                 className="input"
                 type="number"

@@ -52,6 +52,8 @@ export interface Position {
 export type CloseReason = 'tp' | 'sl' | 'manual' | 'session' | 'violation';
 
 export interface Trade {
+  /** traded instrument; missing on older trades, which are gold */
+  instrument?: string;
   levels?: LevelChange[];
   setupId?: string;
   id: string;
@@ -113,6 +115,11 @@ export interface Rules {
   splitLadder?: number[];
   /** gold leverage cap of the program; the app default applies when missing */
   goldLeverage?: number;
+  /** leverage caps for crypto and index CFDs; app defaults when missing (instruments.ts) */
+  cryptoLeverage?: number;
+  indexLeverage?: number;
+  /** crypto commission, % of notional per side; falls back to commissionPct */
+  cryptoCommissionPct?: number;
 }
 
 export interface Payout {
@@ -181,7 +188,10 @@ export interface Drawing {
 }
 
 export interface SessionRec {
-  dataSource?: 'dukascopy-xauusd-bid';
+  /** e.g. 'dukascopy-xauusd-bid' */
+  dataSource?: string;
+  /** traded instrument (instruments.ts); missing on older sessions, which are gold */
+  instrument?: string;
   id: string;
   setupId?: string;
   accountId: string;

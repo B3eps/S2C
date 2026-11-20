@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { SeriesMarker, Time, Logical } from 'lightweight-charts';
 import { ChartController } from '../lib/chartController';
 import { fetchRange } from '../lib/feed';
+import { instrumentOf } from '../lib/instruments';
 import { Bar, TF_MS, Trade } from '../lib/types';
 import { C } from '../lib/theme';
 
@@ -22,7 +23,7 @@ export function TradeChart({ trade, revealed, until }: { trade: Trade; revealed:
     const from = trade.openedAt - 60 * ms;
     let to = trade.closedAt + 20 * ms;
     if (until) to = Math.min(to, until);
-    fetchRange(trade.tf, from, to)
+    fetchRange(trade.tf, from, to, instrumentOf(trade).id)
       .then((b) => alive && setBars(b))
       .catch(() => alive && setErr(true));
     return () => {

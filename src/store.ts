@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { Feed, randomStart } from './lib/feed';
+import { INSTRUMENT_BY_ID, Instrument, InstrumentId, commissionFor, instrumentOf, leverageFor } from './lib/instruments';
 import { store as db } from './lib/db';
 import { play, configureSound } from './lib/sound';
 import { atr } from './lib/indicators';
@@ -75,8 +76,10 @@ export interface Settings {
   sound: boolean;
   volume: number;
   barTick: boolean;
-  /** ask − bid in dollars; undefined uses DEFAULT_SPREAD */
+  /** gold ask − bid in dollars; undefined uses DEFAULT_SPREAD */
   spread?: number;
+  /** ask − bid per other instrument; the instrument default when missing */
+  spreads?: Partial<Record<InstrumentId, number>>;
 }
 
 export type Overlay =
@@ -172,7 +175,8 @@ interface State {
   createAccount(size: number, programId?: string): Promise<void>;
   resetAllAccounts(): Promise<void>;
   archiveAccount(id: string, archived: boolean): Promise<void>;
-  startSession(accountId: string): Promise<void>;
+  /** resume the account's open session, or start a new one on `instrument` (gold by default) */
+  startSession(accountId: string, instrument?: InstrumentId): Promise<void>;
   endSession(reason?: Notice['reason']): Promise<void>;
   advanceToDayEnd(): Promise<void>;
   advanceToNextSignal(): Promise<void>;
@@ -219,23 +223,26 @@ interface State {
 const dir = (s: Side) => (s === 'long' ? 1 : -1);
 /** Ask − bid in dollars applied to the bid candles. */
 export { markPrice };
-export const spreadOf = (s: Settings) => s.spread ?? DEFAULT_SPREAD;
-export const pnlOf = (side: Side, entry: number, exit: number, lots: number) => (exit - entry) * dir(side) * lots * CONTRACT;
+/** Instrument of the open session; contract size, spread, leverage and commission follow it. */
+let inst: Instrument = INSTRUMENT_BY_ID.xauusd;
+export const activeInstrument = () => inst;
+export const spreadOf = (s: Settings) => (inst.id === 'xauusd' ? s.spread ?? DEFAULT_SPREAD : s.spreads?.[inst.id] ?? inst.spread);
+export const pnlOf = (side: Side, entry: number, exit: number, lots: number) => (exit - entry) * dir(side) * lots * inst.contract;
 export const riskOf = (entry: number, sl: number | undefined, lots: number) =>
-  sl === undefined ? undefined : Math.abs(entry - sl) * lots * CONTRACT;
+  sl === undefined ? undefined : Math.abs(entry - sl) * lots * inst.contract;
 const roundLots = (x: number) => Math.max(MIN_LOT, Math.floor(x / MIN_LOT + 1e-9) * MIN_LOT);
 /** XAUUSD gross exposure ceiling: account equity × fixed 15:1 leverage. */
 export const GOLD_LEVERAGE = 15;
-export const maxGoldLots = (equity: number, price: number, lev = GOLD_LEVERAGE) => maxLotsFor(equity, price, lev);
-export const goldMarginRequired = (lots: number, price: number, lev = GOLD_LEVERAGE) => lots * price * CONTRACT / lev;
+export const maxGoldLots = (equity: number, price: number, lev = GOLD_LEVERAGE) => maxLotsFor(equity, price, lev, inst.contract);
+export const goldMarginRequired = (lots: number, price: number, lev = GOLD_LEVERAGE) => lots * price * inst.contract / lev;
 
 function availableGoldLots(a: Account, s: SessionRec, price: number, excludingOrderId?: string) {
-  return availableLots(a.balance, a.rules.goldLeverage ?? GOLD_LEVERAGE, s.positions, s.orders, price, excludingOrderId);
+  return availableLots(a.balance, leverageFor(a.rules, inst), s.positions, s.orders, price, excludingOrderId, inst.contract);
 }
 
 export function ticketLots(t: Ticket, balance: number, entry = t.entry) {
   if (t.useRisk && t.sl !== undefined) {
-    return riskLots(balance * t.riskPct / 100, Math.abs(entry - t.sl));
+    return riskLots(balance * t.riskPct / 100, Math.abs(entry - t.sl), inst.contract);
   }
   return roundLots(t.manualLots);
 }
@@ -471,7 +478,7 @@ export const useApp = create<State>((set, get) => {
     const price = feed.price;
     const sp = spreadOf(get().settings);
     const floating = s.positions.reduce((acc, p) => acc + pnlOf(p.side, p.entry, markPrice(p.side, price, sp), p.lots), 0);
-    const equity = equityAt(a.balance, s.positions, price, sp, a.rules.commissionPct ?? 0);
+    const equity = equityAt(a.balance, s.positions, price, sp, commissionFor(a.rules, inst), inst.contract);
     return {
       price,
       clock: feed.clock,
@@ -485,12 +492,13 @@ export const useApp = create<State>((set, get) => {
   const closePos = (p: Position, exit: number, reason: CloseReason, at: number) => {
     const s = get().session!;
     const a = account()!;
-    const pnl = tradePnl(p, exit, a.rules.commissionPct ?? 0);
+    const pnl = tradePnl(p, exit, commissionFor(a.rules, inst), inst.contract);
     const risk = riskOf(p.entry, p.initialSl, p.lots);
     const dk = `${s.id}:${propDay(at - 60_000)}`;
     a.dayPnl = { ...(a.dayPnl ?? {}), [dk]: (a.dayPnl?.[dk] ?? 0) + pnl };
     const trade: Trade = {
       id: p.id,
+      instrument: inst.id,
       setupId: get().activeSetupId,
       accountId: a.id,
       sessionId: s.id,
@@ -565,7 +573,7 @@ export const useApp = create<State>((set, get) => {
     if (!feed) return false;
     const bid = feed.price;
     const spread = spreadOf(get().settings);
-    const equity = equityAt(a.balance, s.positions, bid, spread, a.rules.commissionPct ?? 0);
+    const equity = equityAt(a.balance, s.positions, bid, spread, commissionFor(a.rules, inst), inst.contract);
     const live = computeLive();
     set({ live: { ...live, worstEquity: Math.min(live.worstEquity, equity) } });
     const { dayFloor, maxFloor } = accountLimits(a, s);
@@ -589,7 +597,7 @@ export const useApp = create<State>((set, get) => {
     // day roll
     const dk = propDay(m.t);
     if (dk !== s.dayKey) {
-      const openingEquity = equityAt(a.balance, s.positions, m.o, sp, a.rules.commissionPct ?? 0);
+      const openingEquity = equityAt(a.balance, s.positions, m.o, sp, commissionFor(a.rules, inst), inst.contract);
       s.dayKey = dk;
       s.dayStartEquity = a.rules.dailyBase === 'balance' ? a.balance : Math.max(a.balance, openingEquity);
       warned = { day: false, max: false };
@@ -601,7 +609,7 @@ export const useApp = create<State>((set, get) => {
     const lim = accountLimits(a, s);
     const outcome = conservativeCandle({
       balance: a.balance, peak: a.peak ?? a.size, positions: s.positions, orders: s.orders,
-      spread: sp, commissionPct: a.rules.commissionPct ?? 0, leverage: a.rules.goldLeverage ?? GOLD_LEVERAGE,
+      spread: sp, commissionPct: commissionFor(a.rules, inst), leverage: leverageFor(a.rules, inst), contract: inst.contract,
       dayFloor: lim.dayFloor, maxFloor: peak => maximumLossFloor(a, peak),
     }, m);
     const filled = new Map<string, Position>();
@@ -614,7 +622,7 @@ export const useApp = create<State>((set, get) => {
       const { order } = event;
       s.orders = s.orders.filter(o => o.id !== order.id);
       if (event.kind === 'cancel') {
-        get().showToast(`Emir iptal: ${a.rules.goldLeverage ?? GOLD_LEVERAGE}× kaldıraçta kullanılabilir miktar ${event.allowed.toFixed(2)} lot.`, 'warn');
+        get().showToast(`Emir iptal: ${leverageFor(a.rules, inst)}× kaldıraçta kullanılabilir miktar ${event.allowed.toFixed(2)} lot.`, 'warn');
         continue;
       }
       const p = openPos(order.side, order.lots, event.price, order.sl, order.tp, order.type, m.t);
@@ -850,19 +858,20 @@ export const useApp = create<State>((set, get) => {
       marketBus.emit('reset');
     },
 
-    async startSession(accountId) {
+    async startSession(accountId, instrument = 'xauusd') {
       const a = get().accounts.find((x) => x.id === accountId);
       if (!a || a.status !== 'active') return;
       if (get().session && get().session!.accountId !== accountId) await get().endSession('user');
       let s = get().sessions.find((x) => x.accountId === accountId && !x.endedAt) ?? null;
       const fresh = !s;
       if (!s) {
-        const start = randomStart();
+        const start = randomStart(instrument);
         s = {
           id: uid(),
           setupId: get().activeSetupId,
           accountId,
-          dataSource: 'dukascopy-xauusd-bid',
+          dataSource: `dukascopy-${instrument}-bid`,
+          instrument,
           startMs: start,
           clockMs: start,
           startedAt: Date.now(),
@@ -880,7 +889,8 @@ export const useApp = create<State>((set, get) => {
         /* ignore */
       }
       try {
-        feed = await Feed.create(s.startMs, s.clockMs, (p) => set({ loading: { progress: p, accountId } }));
+        inst = instrumentOf(s);
+        feed = await Feed.create(s.startMs, s.clockMs, (p) => set({ loading: { progress: p, accountId } }), inst.id);
       } catch {
         set({ loading: { progress: 0, accountId, error: 'Piyasa verisi alınamadı veya doğrulanamadı. Bağlantını kontrol edip tekrar dene.' } });
         return;
@@ -1191,7 +1201,7 @@ export const useApp = create<State>((set, get) => {
       const lotsN = ticketLots(t, a.balance, orderPrice);
       const maxLots = availableGoldLots(a, s, orderPrice);
       if (lotsN > maxLots) {
-        get().showToast(`Lot fazla: bu bakiye ve ${a.rules.goldLeverage ?? GOLD_LEVERAGE}× kaldıraçla en çok ${maxLots.toFixed(2)} lot açabilirsin.`, 'warn');
+        get().showToast(`Lot fazla: bu bakiye ve ${leverageFor(a.rules, inst)}× kaldıraçla en çok ${maxLots.toFixed(2)} lot açabilirsin.`, 'warn');
         return;
       }
       if (!Number.isFinite(lotsN) || lotsN < MIN_LOT) {
@@ -1234,7 +1244,7 @@ export const useApp = create<State>((set, get) => {
       if (!s || !o) return;
       const allowed = availableGoldLots(account()!, s, o.price, o.id);
       const nextLots = Math.min(roundLots(lots), allowed);
-      if (nextLots < MIN_LOT) { get().showToast(`Bu emir için ${account()!.rules.goldLeverage ?? GOLD_LEVERAGE}× kaldıraçta kullanılabilir bakiye yok.`, 'warn'); return; }
+      if (nextLots < MIN_LOT) { get().showToast(`Bu emir için ${leverageFor(account()!.rules, inst)}× kaldıraçta kullanılabilir bakiye yok.`, 'warn'); return; }
       o.lots = nextLots;
       set({ session: { ...s } });
       persistSession(s);

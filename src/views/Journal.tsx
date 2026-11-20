@@ -4,6 +4,7 @@ import { store as db } from '../lib/db';
 import { Icon } from '../components/Icon';
 import { TradeChart } from '../components/TradeChart';
 import { REASON } from './Trade';
+import { instrumentOf } from '../lib/instruments';
 import { goldPrice, longDate, clockUtc, lots as fmtLots, rMult, signedMoney, wallDate } from '../lib/format';
 
 function Shot({ id, caption }: { id?: string; caption: string }) {
@@ -87,7 +88,8 @@ export function Journal() {
                   <td>
                     <span className={`side-tag ${t.side}`}>
                       <Icon name={t.side === 'long' ? 'up' : 'down'} size={14} /> {t.side === 'long' ? 'Long' : 'Short'}
-                    </span>
+                    </span>{' '}
+                    <span className="muted">{instrumentOf(t).symbol}</span>
                   </td>
                   <td>{REASON[t.reason]}</td>
                   <td className={`r ${t.pnl > 0 ? 'up' : t.pnl < 0 ? 'down' : ''}`}>{signedMoney(t.pnl)}</td>
@@ -121,6 +123,8 @@ export function Journal() {
               <dd>
                 {rMult(sel.r)} · {REASON[sel.reason]}
               </dd>
+              <dt>Enstrüman</dt>
+              <dd>{instrumentOf(sel).symbol} · {instrumentOf(sel).name}</dd>
               <dt>Emir tipi</dt>
               <dd>{sel.orderType === 'market' ? 'Piyasa' : sel.orderType === 'limit' ? 'Limit' : 'Stop'}</dd>
               <dt>Gerçek tarih</dt>

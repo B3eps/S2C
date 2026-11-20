@@ -448,3 +448,19 @@ test('seçili çizimde tutamaç gövdeden önce gelir', () => {
   assert.equal(scene.hitShapes(scene.drawingShapes(d, env, true), 11, 101), 'a');
   assert.equal(scene.hitShapes(scene.drawingShapes(d, env, false), 11, 101), 'body');
 });
+
+const instruments = await load('src/lib/instruments.ts');
+test('enstrüman sözleşmesi risk lotunu belirler', () => {
+  // 50 $ risk, 500 $ stop: BTC (1 lot = 1 BTC) 0,10 lot, altın sözleşmesiyle 0 lot
+  assert.equal(exec.riskLots(50, 500, instruments.INSTRUMENT_BY_ID.btcusd.contract), 0.1);
+  assert.equal(exec.riskLots(50, 500), 0);
+});
+test('FTM kripto kaldıracı ve komisyonu altından ayrıdır, eski kayıtlar altın sayılır', () => {
+  const ftm = programs.PROGRAMS.find((p) => p.id === 'ftm-infinity').rules;
+  const { btcusd, xauusd } = instruments.INSTRUMENT_BY_ID;
+  assert.equal(instruments.leverageFor(ftm, btcusd), 8);
+  assert.equal(instruments.leverageFor(ftm, xauusd), 10);
+  assert.equal(instruments.commissionFor(ftm, btcusd), 0.03);
+  assert.equal(instruments.commissionFor(ftm, xauusd), 0.005);
+  assert.equal(instruments.instrumentOf({}).id, 'xauusd');
+});

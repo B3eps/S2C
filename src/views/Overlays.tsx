@@ -3,6 +3,7 @@ import { splitFor } from '../lib/programs';
 import { Icon } from '../components/Icon';
 import { CertLabel } from '../components/bits';
 import { Emblem } from '../components/Emblem';
+import { instrumentOf } from '../lib/instruments';
 import { goldPrice, longDate, clockUtc, money, signedMoney, rMult, plainPct } from '../lib/format';
 import { summarize } from '../lib/stats';
 
@@ -105,7 +106,7 @@ export function Notices() {
         const rows: [string, React.ReactNode, boolean?][] = [
           ['Gerçek tarih', longDate(s.startMs), true],
           ['Saat (UTC)', `${clockUtc(s.startMs)} → ${clockUtc(s.clockMs)}${longDate(s.clockMs) !== longDate(s.startMs) ? ` · ${longDate(s.clockMs)}` : ''}`],
-          ['XAUUSD', s.firstPrice && s.lastPrice ? `${goldPrice(s.firstPrice)} → ${goldPrice(s.lastPrice)}` : '—', true],
+          [instrumentOf(s).symbol, s.firstPrice && s.lastPrice ? `${goldPrice(s.firstPrice)} → ${goldPrice(s.lastPrice)}` : '—', true],
           ['Aralık', s.high && s.low ? `${goldPrice(s.low)} – ${goldPrice(s.high)}` : '—'],
           ['İşlem', sum.count ? `${sum.count} · ${plainPct(sum.winRate, 0)} kazanma` : 'İşlem yok'],
           [

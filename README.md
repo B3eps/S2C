@@ -10,6 +10,10 @@ Gerçek altın grafiği geçmişten rastgele bir anda açılır. Fiyat ve tarih 
 
 ## Neler var
 
+- **Enstrümanlar:** Altın (XAUUSD), Bitcoin (BTCUSD), Ethereum (ETHUSD), S&P 500 (US500) ve Nasdaq 100 (US100). Enstrüman her seansın başında hesap kartından seçilir.
+  - 1 lot: 100 ons altın, 1 BTC, 1 ETH, endekslerde puan başına 1 $.
+  - Kripto hafta sonu da işlem görür. Altın ve endeksler Cuma 17:00 – Pazar 18:00 (New York) kapalıdır.
+  - Kaldıraç ve komisyon programın kurallarından gelir (FTM: altın 10x, BTC/ETH 8x, kripto komisyonu %0,03). Program sınır yayımlamamışsa varsayılanlar: altın 15x, kripto 2x, endeks 20x.
 - **Grafik**
   - Kör replay: gerçek Dukascopy XAU/USD mumları, fiyat ve tarih gizli.
   - Gizli fiyat tek tıkla açılabilir.

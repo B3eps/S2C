@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { splitFor } from '../lib/programs';
-import { useApp, SPEEDS, ticketLots, riskOf, pnlOf, markPrice, spreadOf, accountLimits, countedDays, passBlocker, payoutBlocker, consistencyScore } from '../store';
+import { commissionFor } from '../lib/instruments';
+import { activeInstrument, useApp, SPEEDS, ticketLots, riskOf, pnlOf, markPrice, spreadOf, accountLimits, countedDays, passBlocker, payoutBlocker, consistencyScore } from '../store';
 import { isParcaId } from '../lib/parcaVariants';
 import { ChartPanel } from '../components/ChartPanel';
 import { ToolRail, GRID } from '../components/ToolRail';
@@ -399,7 +400,7 @@ function OrderPanel() {
         </dl>
         {account.phase === 'funded' && <div className="hint-line">Fonlu hesapta zarar limitleri aynen geçerli. Aşılırsa hesap kapanır.</div>}
         {passBlocker(account, session.positions.length) && <div className="hint-line warn-c">{passBlocker(account, session.positions.length)}</div>}
-        {!!account.rules.commissionPct && <div className="hint-line">Komisyon %{String(account.rules.commissionPct).replace('.', ',')} / yön, kâr ve zarara dahil.</div>}
+        {!!commissionFor(account.rules, activeInstrument()) && <div className="hint-line">Komisyon %{String(commissionFor(account.rules, activeInstrument())).replace('.', ',')} / yön, kâr ve zarara dahil.</div>}
         {account.phase === 'funded' && (
           <button className="btn" disabled={!!payoutBlocker(account, session.positions.length)} title={payoutBlocker(account, session.positions.length) ?? undefined} onClick={() => S().requestPayout(account.id)}>
             <Icon name="coin" size={16} /> Ödeme iste

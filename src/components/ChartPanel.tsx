@@ -6,6 +6,7 @@ import { TF, TFS, TF_LABEL, TF_MS, Drawing, Anchor, Side, uid } from '../lib/typ
 import { TOOL_BY_KIND, defaultStop } from '../lib/drawings';
 import { drawingShapes, hitShapes, Shape, Handle, SceneEnv } from '../lib/drawingScene';
 import { OverlayPrimitive } from '../lib/overlayPrimitive';
+import { instrumentOf } from '../lib/instruments';
 import type { SetupMark } from '../lib/parcaSetup';
 import { IND_BY_ID, ActiveInd } from '../lib/indicators';
 import { createSetupEngine, SetupResult } from '../lib/parcaSetup';
@@ -716,7 +717,7 @@ export function ChartPanel({ index }: { index: number }) {
   return (
     <div className="chart-panel">
       <div className="chart-head">
-        <span className="symbol">XAUUSD</span>
+        <span className="symbol">{instrumentOf(session).symbol}</span>
         <div className="seg" role="group" aria-label="Zaman dilimi">
           {TFS.map((t) => (
             <button key={t} aria-pressed={t === tf} onClick={() => setTf(t)}>

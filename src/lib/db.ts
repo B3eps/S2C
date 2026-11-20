@@ -1,5 +1,6 @@
 import { openDB, IDBPDatabase } from 'idb';
 import type { Account, SessionRec, SetupRecord, Trade } from './types';
+import { isInstrumentId } from './instruments';
 
 const DB = 's2c';
 let dbp: Promise<IDBPDatabase> | null = null;
@@ -148,6 +149,8 @@ export async function inspectBackup(file: File) {
     sessionIds.add(s.id);
   }
   const owners = new Map(data.sessions.map((s: SessionRec) => [s.id, s.accountId]));
+  const instrumentOk = (v: unknown) => v === undefined || isInstrumentId(v);
+  if (!data.sessions.every((s: SessionRec) => instrumentOk(s.instrument)) || !data.trades.every((t: Trade) => instrumentOk(t.instrument))) throw new Error('Yedekte tanınmayan enstrüman var.');
   const tradeIds = new Set<string>();
   for (const t of data.trades) {
     if (tradeIds.has(t.id) || !setupIds.has(t.setupId) || !ids.has(t.accountId) || !sessionIds.has(t.sessionId) || !number(t.pnl) || !number(t.realClosedAt) || !number(t.entry) || !number(t.exit) || !number(t.lots) || t.lots <= 0 || !['long', 'short'].includes(t.side)) throw new Error('Yedekte geçersiz işlem var.');

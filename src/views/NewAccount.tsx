@@ -66,6 +66,11 @@ export function NewAccount() {
               Altın kaldıracı <b>{rules.goldLeverage}x</b>
             </span>
           ) : null}
+          {rules.cryptoLeverage ? (
+            <span>
+              BTC/ETH kaldıracı <b>{rules.cryptoLeverage}x</b>
+            </span>
+          ) : null}
           {rules.commissionPct ? (
             <span>
               Komisyon <b>{pctTr(rules.commissionPct)}</b> / yön

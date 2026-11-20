@@ -57,6 +57,8 @@ const ftm = {
   maxType: 'static' as const,
   minDays: 0,
   goldLeverage: 10,
+  cryptoLeverage: 8,
+  cryptoCommissionPct: 0.03,
 };
 
 export const PROGRAMS: Program[] = [

@@ -1,5 +1,9 @@
 import { Bar, TF, TFS, TF_MS } from './types';
 import { DayBar, dailyBars, isClosed, usDst } from './market';
+import { INSTRUMENT_BY_ID, InstrumentId, tradesAllWeek } from './instruments';
+
+/** Closed minutes of an instrument: crypto never closes. */
+const closedFor = (inst: InstrumentId) => (tradesAllWeek(INSTRUMENT_BY_ID[inst]) ? () => false : isClosed);
 
 const MIN = 60_000;
 const DAY = 86_400_000;
@@ -26,16 +30,17 @@ function aggregate(bars: Bar[], ms: number): Bar[] {
  * 4-hour candles are built from hourly ones: a native 4-hour candle straddles the weekend
  * close, so it cannot be filtered by its open time without losing or leaking an hour.
  */
-async function fetchCandles(tf: TF, from: number, to: number): Promise<Bar[]> {
+async function fetchCandles(tf: TF, from: number, to: number, inst: InstrumentId = 'xauusd'): Promise<Bar[]> {
+  const closed = closedFor(inst);
   if (tf === '4h') {
     const ms = TF_MS['4h'];
-    return aggregate(await fetchCandles('1h', Math.floor(from / ms) * ms, to), ms).filter((b) => b.t >= from);
+    return aggregate(await fetchCandles('1h', Math.floor(from / ms) * ms, to, inst), ms).filter((b) => b.t >= from);
   }
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const res = await fetch(`/api/candles?tf=${tf}&from=${Math.floor(from)}&to=${Math.floor(to)}`);
-      if (!res.ok) throw new Error(`XAU ${res.status}`);
+      const res = await fetch(`/api/candles?i=${inst}&tf=${tf}&from=${Math.floor(from)}&to=${Math.floor(to)}`);
+      if (!res.ok) throw new Error(`${inst} ${res.status}`);
       const raw: unknown = await res.json();
       if (!Array.isArray(raw)) throw new Error('Geçersiz mum verisi');
       let previous = -Infinity;
@@ -45,7 +50,7 @@ async function fetchCandles(tf: TF, from: number, to: number): Promise<Bar[]> {
         const [t, o, h, l, c, v] = row;
         if (t < from || t >= to || t % TF_MS[tf] !== 0 || t <= previous || h < Math.max(o, c, l) || l > Math.min(o, c, h) || v < 0) throw new Error('Mum verisi tutarsız');
         previous = t;
-        if (!isClosed(t)) bars.push({ t, o, h, l, c, v });
+        if (!closed(t)) bars.push({ t, o, h, l, c, v });
       }
       return bars;
     } catch (e) {
@@ -57,12 +62,12 @@ async function fetchCandles(tf: TF, from: number, to: number): Promise<Bar[]> {
 }
 
 /** Historical candles may only use minutes closed by the exclusive replay cutoff. */
-export async function fetchRange(tf: TF, from: number, to: number): Promise<Bar[]> {
+export async function fetchRange(tf: TF, from: number, to: number, inst: InstrumentId = 'xauusd'): Promise<Bar[]> {
   const bucket = Math.floor(to / TF_MS[tf]) * TF_MS[tf];
   const [history, tail] = await Promise.all([
-    bucket > from ? fetchCandles(tf, from, bucket) : Promise.resolve([] as Bar[]),
+    bucket > from ? fetchCandles(tf, from, bucket, inst) : Promise.resolve([] as Bar[]),
     tf !== '1m' && bucket >= from && to - bucket >= MIN
-      ? fetchCandles('1m', bucket, Math.floor(to / MIN) * MIN)
+      ? fetchCandles('1m', bucket, Math.floor(to / MIN) * MIN, inst)
       : Promise.resolve([] as Bar[]),
   ]);
   if (!tail.length) return history;
@@ -75,30 +80,32 @@ export async function fetchRange(tf: TF, from: number, to: number): Promise<Bar[
 
 /** Expected quote minutes, excluding the usual 17:00–18:00 New York maintenance.
  * Holidays and thin markets can still appear as flagged gaps. */
-export function missingQuoteMinutes(first: number, until: number, stopAt = Infinity): number {
+export function missingQuoteMinutes(first: number, until: number, stopAt = Infinity, inst: InstrumentId = 'xauusd'): number {
+  const closed = closedFor(inst);
   let missing = 0;
   for (let t = first; t < until; t += MIN) {
     const localHour = new Date(t - (usDst(t) ? 4 : 5) * 3_600_000).getUTCHours();
-    if (!isClosed(t) && localHour !== 17 && ++missing >= stopAt) break;
+    if (!closed(t) && localHour !== 17 && ++missing >= stopAt) break;
   }
   return missing;
 }
 
 /** Last `count` closed bars that opened before `end`. */
-async function fetchBefore(tf: TF, end: number, count: number): Promise<Bar[]> {
+async function fetchBefore(tf: TF, end: number, count: number, inst: InstrumentId): Promise<Bar[]> {
   // ~5 trading days in 7, plus holidays: ask for twice the span
   const span = Math.max(TF_MS[tf] * count * 2, 3 * DAY);
-  const bars = await fetchCandles(tf, end - span, end);
+  const bars = await fetchCandles(tf, end - span, end, inst);
   return bars.slice(-count);
 }
 
 /** Random minute inside the last three years (ending two weeks ago), inside trading hours. */
-export function randomStart(): number {
+export function randomStart(inst: InstrumentId = 'xauusd'): number {
+  const closed = closedFor(inst);
   const hi = Date.now() - 14 * DAY;
   const lo = Date.now() - 3 * 365 * DAY;
   for (;;) {
     const t = Math.floor((lo + Math.random() * (hi - lo)) / MIN) * MIN;
-    if (!isClosed(t) && !isClosed(t - 6 * 3_600_000)) return t;
+    if (!closed(t) && !closed(t - 6 * 3_600_000)) return t;
   }
 }
 
@@ -122,21 +129,21 @@ export class Feed {
   private loading: Promise<void> | null = null;
   loadError = false;
 
-  private constructor(public startMs: number) {
+  private constructor(public startMs: number, public inst: InstrumentId) {
     this.base0 = Math.floor(startMs / TF_MS['4h']) * TF_MS['4h'] - TF_MS['4h'];
     for (const tf of TFS) this.agg[tf] = [];
   }
 
-  static async create(startMs: number, clockMs = startMs, onProgress?: (p: number) => void): Promise<Feed> {
-    const f = new Feed(startMs);
+  static async create(startMs: number, clockMs = startMs, onProgress?: (p: number) => void, inst: InstrumentId = 'xauusd'): Promise<Feed> {
+    const f = new Feed(startMs, inst);
     let done = 0;
     const tick = () => onProgress?.(++done / (TFS.length + 1));
     await Promise.all(
       TFS.map(async (tf) => {
         if (tf === '1h') {
-          f.h1Long = await fetchBefore('1h', f.base0, HIST * 4);
+          f.h1Long = await fetchBefore('1h', f.base0, HIST * 4, inst);
           f.hist[tf] = f.h1Long.slice(-HIST);
-        } else f.hist[tf] = await fetchBefore(tf, f.base0, HIST);
+        } else f.hist[tf] = await fetchBefore(tf, f.base0, HIST, inst);
         tick();
       }),
     );
@@ -154,15 +161,15 @@ export class Feed {
     const now = Math.floor(Date.now() / MIN) * MIN - 2 * MIN;
     while (this.cursor < until && this.cursor < now) {
       const to = Math.min(this.cursor + 2 * DAY, now);
-      const chunk = await fetchCandles('1m', this.cursor, to);
+      const chunk = await fetchCandles('1m', this.cursor, to, this.inst);
       const last = this.minutes[this.minutes.length - 1];
       if (!this.hasGaps) {
         let expected = this.cursor;
         for (const b of chunk) {
-          if (missingQuoteMinutes(expected, b.t, 1)) { this.hasGaps = true; break; }
+          if (missingQuoteMinutes(expected, b.t, 1, this.inst)) { this.hasGaps = true; break; }
           expected = b.t + MIN;
         }
-        if (!this.hasGaps && missingQuoteMinutes(expected, to, 1)) this.hasGaps = true;
+        if (!this.hasGaps && missingQuoteMinutes(expected, to, 1, this.inst)) this.hasGaps = true;
       }
       this.minutes.push(...(last ? chunk.filter((b) => b.t > last.t) : chunk));
       this.cursor = to;
@@ -254,6 +261,6 @@ export class Feed {
 }
 
 /** Fetch 1m bars around a closed trade for the trade replay view. */
-export async function fetchWindow(from: number, to: number, tf: TF) {
-  return fetchRange(tf, from, to);
+export async function fetchWindow(from: number, to: number, tf: TF, inst: InstrumentId = 'xauusd') {
+  return fetchRange(tf, from, to, inst);
 }

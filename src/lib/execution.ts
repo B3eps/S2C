@@ -40,23 +40,24 @@ export function positionExit(position: Position, bar: Bar, entryOnBar: boolean, 
   return undefined;
 }
 
-export function riskLots(budget: number, distance: number) {
+/** Contract defaults are gold (1 lot = 100 oz); other instruments pass their own (instruments.ts). */
+export function riskLots(budget: number, distance: number, contract = CONTRACT) {
   if (!(budget > 0 && distance > 0)) return 0;
-  return Math.floor(budget / (distance * CONTRACT * MIN_LOT) + 1e-10) * MIN_LOT;
+  return Math.floor(budget / (distance * contract * MIN_LOT) + 1e-10) * MIN_LOT;
 }
 
-export function worstEquity(balance: number, positions: Position[], bar: Bar, spread = 0) {
+export function worstEquity(balance: number, positions: Position[], bar: Bar, spread = 0, contract = CONTRACT) {
   const equityAt = (bid: number) => positions.reduce((sum, p) =>
-    sum + (markPrice(p.side, bid, spread) - p.entry) * p.lots * CONTRACT * (p.side === 'long' ? 1 : -1), balance);
+    sum + (markPrice(p.side, bid, spread) - p.entry) * p.lots * contract * (p.side === 'long' ? 1 : -1), balance);
   return Math.min(equityAt(bar.l), equityAt(bar.h));
 }
 
-export const tradePnl = (p: Pick<Position, 'side' | 'entry' | 'lots'>, exit: number, commissionPct: number) =>
-  ((exit - p.entry) * (p.side === 'long' ? 1 : -1) - (p.entry + exit) * commissionPct / 100) * p.lots * CONTRACT;
+export const tradePnl = (p: Pick<Position, 'side' | 'entry' | 'lots'>, exit: number, commissionPct: number, contract = CONTRACT) =>
+  ((exit - p.entry) * (p.side === 'long' ? 1 : -1) - (p.entry + exit) * commissionPct / 100) * p.lots * contract;
 
-export const equityAt = (balance: number, positions: readonly Position[], bid: number, spread: number, commissionPct: number) =>
+export const equityAt = (balance: number, positions: readonly Position[], bid: number, spread: number, commissionPct: number, contract = CONTRACT) =>
   positions.reduce((sum, p) => sum + ((markPrice(p.side, bid, spread) - p.entry) *
-    (p.side === 'long' ? 1 : -1) - p.entry * commissionPct / 100) * p.lots * CONTRACT, balance);
+    (p.side === 'long' ? 1 : -1) - p.entry * commissionPct / 100) * p.lots * contract, balance);
 
 export type CandlePath = 'high-first' | 'low-first';
 export type CandleEvent =
@@ -72,17 +73,19 @@ export interface CandleBook {
   spread: number;
   commissionPct: number;
   leverage: number;
+  /** units per lot; gold when missing */
+  contract?: number;
   dayFloor: number;
   maxFloor: (peak: number) => number;
 }
 
-export const maxLotsFor = (equity: number, price: number, leverage: number) =>
-  equity > 0 && price > 0 ? Math.floor(equity * leverage / (price * CONTRACT * MIN_LOT) + 1e-9) * MIN_LOT : 0;
+export const maxLotsFor = (equity: number, price: number, leverage: number, contract = CONTRACT) =>
+  equity > 0 && price > 0 ? Math.floor(equity * leverage / (price * contract * MIN_LOT) + 1e-9) * MIN_LOT : 0;
 
-export function availableLots(balance: number, leverage: number, positions: readonly Position[], orders: readonly Order[], price: number, excluding?: string) {
-  const used = positions.reduce((sum, p) => sum + p.lots * p.entry * CONTRACT, 0) +
-    orders.reduce((sum, o) => sum + (o.id === excluding ? 0 : o.lots * o.price * CONTRACT), 0);
-  return maxLotsFor(balance - used / leverage, price, leverage);
+export function availableLots(balance: number, leverage: number, positions: readonly Position[], orders: readonly Order[], price: number, excluding?: string, contract = CONTRACT) {
+  const used = positions.reduce((sum, p) => sum + p.lots * p.entry * contract, 0) +
+    orders.reduce((sum, o) => sum + (o.id === excluding ? 0 : o.lots * o.price * contract), 0);
+  return maxLotsFor(balance - used / leverage, price, leverage, contract);
 }
 
 const EPS = 1e-8;
@@ -90,6 +93,7 @@ const EPS = 1e-8;
 /** Resolve crossings on one monotone-segment OHLC path. The open is a discontinuity. */
 export function simulateCandle(book: CandleBook, bar: Bar, path: CandlePath) {
   const { spread, commissionPct, leverage, dayFloor, maxFloor } = book;
+  const contract = book.contract ?? CONTRACT;
   let { balance, peak } = book;
   const positions = new Map(book.positions.map(p => [p.id, p]));
   const orders = new Map(book.orders.map(o => [o.id, o]));
@@ -97,11 +101,11 @@ export function simulateCandle(book: CandleBook, bar: Bar, path: CandlePath) {
   let worst = Infinity;
   let bid = bar.o;
   let breach: { floor: 'day' | 'max'; equity: number; limit: number; bid: number; crossing: boolean } | undefined;
-  const equity = (price: number) => equityAt(balance, [...positions.values()], price, spread, commissionPct);
+  const equity = (price: number) => equityAt(balance, [...positions.values()], price, spread, commissionPct, contract);
   const close = (p: Position, reason: 'sl' | 'tp' | 'violation') => {
     const price = markPrice(p.side, bid, spread);
     positions.delete(p.id);
-    balance += tradePnl(p, price, commissionPct);
+    balance += tradePnl(p, price, commissionPct, contract);
     peak = Math.max(peak, balance);
     events.push({ kind: 'exit', id: p.id, price, reason });
   };
@@ -136,7 +140,7 @@ export function simulateCandle(book: CandleBook, bar: Bar, path: CandlePath) {
         const order = [...orders.values()].find(o => (o.side === 'long') === (o.type === 'stop') ? bid >= orderBid(o) - EPS : bid <= orderBid(o) + EPS);
         if (!order) return;
         const price = entryPrice(order.side, bid, spread);
-        const allowed = availableLots(balance, leverage, [...positions.values()], [...orders.values()], price, order.id);
+        const allowed = availableLots(balance, leverage, [...positions.values()], [...orders.values()], price, order.id, contract);
         orders.delete(order.id);
         if (order.lots > allowed + EPS) events.push({ kind: 'cancel', order, allowed });
         else {

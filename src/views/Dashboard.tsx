@@ -5,6 +5,7 @@ import { Icon } from '../components/Icon';
 import { Emblem } from '../components/Emblem';
 import { money, wallDateTime } from '../lib/format';
 import type { Account } from '../lib/types';
+import { INSTRUMENTS, InstrumentId } from '../lib/instruments';
 
 type Tab = 'active' | 'funded' | 'violated' | 'archived';
 const TABS: [Tab, string][] = [
@@ -24,6 +25,8 @@ export function Dashboard() {
   const trades = useApp((s) => s.trades);
   const S = useApp.getState;
   const net = trades.reduce((t, x) => t + x.pnl, 0);
+  /** instrument chosen per account for its next session */
+  const [picks, setPicks] = useState<Record<string, InstrumentId>>({});
   const [tab, setTab] = useState<Tab>(() => (accounts.some((a) => inTab(a, 'active')) ? 'active' : accounts.some((a) => inTab(a, 'funded')) ? 'funded' : 'active'));
 
   if (!accounts.length) {
@@ -32,7 +35,7 @@ export function Dashboard() {
         <div className="dashboard-start-head"><div><h1>Hesaplar</h1><p>Fon hesapların</p></div><button className="btn primary" onClick={() => S().go('new')}><Icon name="plus" size={16} /> Yeni hesap</button></div>
         <div className="dashboard-start-layout">
           <section className="panel dashboard-start-main">
-            <div className="dashboard-start-brand"><Emblem width={88} /><span>XAUUSD · Kör replay</span></div>
+            <div className="dashboard-start-brand"><Emblem width={88} /><span>Kör replay</span></div>
             <div><h2>Henüz bir hesabın yok</h2><p>Bir hesap oluştur; durumunu, kurallarını ve ilerlemeni buradan takip et.</p></div>
             <button className="btn primary lg" onClick={() => S().go('new')}><Icon name="plus" size={18} /> Hesap seç</button>
           </section>
@@ -106,7 +109,12 @@ export function Dashboard() {
                               <Icon name="coin" size={16} /> Ödeme iste
                             </button>
                           )}
-                          <button className="btn primary" onClick={() => (isLive ? S().go('trade') : S().startSession(a.id))}>
+                          {!isLive && !hasOpen && (
+                            <select className="input instrument-pick" aria-label="Enstrüman" value={picks[a.id] ?? 'xauusd'} onChange={(e) => setPicks({ ...picks, [a.id]: e.target.value as InstrumentId })}>
+                              {INSTRUMENTS.map((i) => <option key={i.id} value={i.id}>{i.symbol} · {i.name}</option>)}
+                            </select>
+                          )}
+                          <button className="btn primary" onClick={() => (isLive ? S().go('trade') : S().startSession(a.id, picks[a.id] ?? 'xauusd'))}>
                             {isLive || hasOpen ? 'Seansa dön' : 'Seans başlat'}
                           </button>
                         </div>
