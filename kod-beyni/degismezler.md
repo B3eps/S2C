@@ -25,7 +25,8 @@ Kodda görünmeyen ama bozulursa ürünü bozan kurallar. Bir değişiklik bunla
 - **Enstrüman seansa bağlı:** sözleşme, spread, kaldıraç ve komisyon `store.ts`teki `inst` üzerinden gelir; yeni hesaplamada `CONTRACT` sabitini doğrudan kullanma. `instrument` alanı olmayan eski kayıt altındır.
 - `src/lib/theme.ts` ↔ `src/styles/tokens.css` renkleri elle eş tutulur.
 - Altın rengi (`--gold`) yalnız amblem, sertifika etiketi ve ekranın tek ana eylemi için. Pozitif veri `--up` rengindedir.
-- Animasyonlar yalnız `transform`/`opacity`; `prefers-reduced-motion` hepsini kapatır.
+- Animasyonlar yalnız `transform`/`opacity`; `prefers-reduced-motion` hepsini kapatır. Motion (`motion/react`, `LazyMotion strict`) yalnız menü/flyout açılıp kapanması, bildirim ve düzen değişimi için; `motion.div` değil `m.div` kullan. Grafik içindeki efektler CSS ve tuvalde kalır.
+- **Genişlik:** sayfa en az 960 px. Izgara kaplarına (`.trade`, `.dock`) `minmax(0, 1fr)` sütun ver; vermezsen içerik ekranı genişletir. Dar ekranda kısalan düğmeler `aria-label` ile tam adını korur (tarayıcı testi bu adlarla arar).
 - `store.ts` seansı yerinde değiştirip `{ ...s }` ile yeni nesne verir; bileşenler sığ karşılaştırma yapar. Yeni eylemde aynı deseni izle.
 - Prop günü 22:00 UTC; takvim günüyle karıştırma.
 - `tsconfig.json` yalnız `src`'i kapsar; `vite.config.ts` ve `scripts/` tip denetimine girmez.

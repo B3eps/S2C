@@ -19,7 +19,6 @@ tags: [s2c, kod, yapilacaklar]
 
 ## 3. Doğruluk
 - **`parcaModel1m.ts` etiket hatası:** `source.includes('5dk')` 15dk sinyallerinde de 1 olur. Tam eşleşmeyle düzelt, modeli yeniden eğit (README bunu zaten söylüyor).
-- **Dar ekranda sağ panel sıkışıyor (1024 px).** Grafik başlığındaki gösterge ve Parça etiketleri satırı daraltmıyor, sağ emir paneli kesiliyor. 1440 px'te sorun yok. Etiket satırı taşınca kaydırılabilir ya da katlanabilir olmalı.
 - **Endeks kaldıraç sınırı doğrulanmadı.** FTM sitesinde endeks kaldıracı bulunamadı; uygulama varsayılanı 20x. BEM'in kripto/endeks kuralları da modellenmedi.
 - **`Feed.minutes` sınırsız büyür.** Çok uzun seansta (haftalar) bellek artar. Gerekmeyen eski dakikaları kırp ya da sınırla.
 

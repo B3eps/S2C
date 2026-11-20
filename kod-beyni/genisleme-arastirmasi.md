@@ -4,7 +4,7 @@ tags: [s2c, fikir, arastirma]
 
 # Genişleme araştırması (20 Kasım 2026)
 
-Kullanıcının istediği üç iş: yeni enstrümanlar, daha kararlı grafik ve çizimler, animasyonlu arayüz. **Durum (20 Kasım 2026):** çizimler tuvale taşındı, beş enstrüman eklendi, gün şeridi eklendi. Animasyon kütüphanesi henüz eklenmedi. Kullanıcı ilkesi: her konuda kökenine kadar araştır, ücretsiz kaynakları dene, özgün özellik yaz ve çiz.
+Kullanıcının istediği üç iş: yeni enstrümanlar, daha kararlı grafik ve çizimler, animasyonlu arayüz. **Durum (20 Kasım 2026):** çizimler tuvale taşındı, beş enstrüman eklendi, gün şeridi eklendi. Motion 14.10.1 eklendi (menüler, bildirimler, düzen değişimi); grafik pencereleri için görünüm menüsü, yerleşim (yan yana / üst üste / odak) ve imleç eşitleme eklendi. Kullanıcı ilkesi: her konuda kökenine kadar araştır, ücretsiz kaynakları dene, özgün özellik yaz ve çiz.
 
 ## 1. Yeni enstrümanlar
 **Denendi:** `dukascopy-node` ile 10 ve 14 Kasım 2026 için 1dk mum indirildi.

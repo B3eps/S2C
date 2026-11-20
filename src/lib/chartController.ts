@@ -1,12 +1,13 @@
 import {
   CandlestickSeries, CrosshairMode, HistogramSeries, IChartApi, IPriceLine, ISeriesApi, ISeriesMarkersPluginApi,
-  LineSeries, LineStyle, Logical, SeriesMarker, Time, UTCTimestamp, createChart, createSeriesMarkers,
+  LineSeries, LineStyle, Logical, PriceScaleMode, SeriesMarker, Time, UTCTimestamp, createChart, createSeriesMarkers,
 } from 'lightweight-charts';
 import { C, SERIES, alpha } from './theme';
 import { ActiveInd, IND_BY_ID, IndContext, IndDef } from './indicators';
 import { Bar, TF, TF_MS } from './types';
 import { marketSession } from './calendar';
 import { clockUtc } from './format';
+import type { PaneView } from '../store';
 
 const sec = (ms: number) => (ms / 1000) as UTCTimestamp;
 
@@ -135,8 +136,21 @@ export class ChartController {
   }
 
   setBandsVisible(v: boolean) {
+    if (v && !this.showBands) this.bands.setData(this.bandData(this.bars));
     this.showBands = v;
     this.bands.applyOptions({ visible: v });
+  }
+
+  /** Per-pane look (PaneView); missing fields keep the app standard. */
+  applyView(v: PaneView = {}) {
+    this.candles.applyOptions({ upColor: v.hollow ? 'rgba(0,0,0,0)' : C.up });
+    this.setBandsVisible(v.bands !== false);
+    const grid = v.grid !== false;
+    this.chart.applyOptions({
+      grid: { vertLines: { visible: grid }, horzLines: { visible: grid } },
+      timeScale: { shiftVisibleRangeOnNewBar: v.follow !== false },
+    });
+    this.chart.priceScale('right').applyOptions({ mode: v.log ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal });
   }
 
   private bandData(bars: Bar[]) {

@@ -3,6 +3,8 @@ import { useApp, LAYOUTS } from '../store';
 import { CATS, TOOLS, TOOL_BY_KIND, ToolCat, ToolDef } from '../lib/drawings';
 import type { DrawingKind } from '../lib/types';
 import { Icon, IconName } from './Icon';
+import { AnimatePresence, m } from 'motion/react';
+import { flyout } from '../lib/motion';
 
 const ICON: Record<DrawingKind, IconName> = {
   trend: 'trend',
@@ -26,6 +28,40 @@ const ICON: Record<DrawingKind, IconName> = {
 
 /** Grid shape per pane count: [columns, rows]. */
 export const GRID: Record<number, [number, number]> = { 1: [1, 1], 2: [2, 1], 3: [3, 1], 4: [2, 2], 6: [3, 2], 8: [4, 2] };
+
+export type Arrange = 'cols' | 'rows' | 'focus';
+const fr = (n: number) => `repeat(${n}, minmax(0, 1fr))`;
+/**
+ * Grid tracks for the chart panes. cols: side by side; rows: stacked; focus: the first pane
+ * large on the left, the others in one or two columns beside it.
+ */
+export function paneGrid(count: number, arrange: Arrange = 'cols'): { cols: string; rows: string; focus: boolean } {
+  if (count <= 1) return { cols: fr(1), rows: fr(1), focus: false };
+  if (arrange === 'focus') {
+    const side = count - 1 > 3 ? 2 : 1;
+    return { cols: `minmax(0, 2fr) ${fr(side)}`, rows: fr(Math.ceil((count - 1) / side)), focus: true };
+  }
+  const [c, r] = GRID[count] ?? [1, 1];
+  return arrange === 'rows' ? { cols: fr(r), rows: fr(c), focus: false } : { cols: fr(c), rows: fr(r), focus: false };
+}
+
+const ARRANGE: { id: Arrange; name: string; hint: string }[] = [
+  { id: 'cols', name: 'Yan yana', hint: 'Grafikler soldan sağa dizilir' },
+  { id: 'rows', name: 'Üst üste', hint: 'Grafikler yukarıdan aşağı dizilir; uzun zaman çizgisi için' },
+  { id: 'focus', name: 'Odak', hint: 'İlk grafik büyük, diğerleri yanında küçük' },
+];
+
+/** a tiny picture of a pane arrangement */
+function Mini({ count, arrange }: { count: number; arrange: Arrange }) {
+  const g = paneGrid(count, arrange);
+  return (
+    <span className="mini" style={{ gridTemplateColumns: g.cols, gridTemplateRows: g.rows }}>
+      {Array.from({ length: count }, (_, i) => (
+        <i key={i} style={g.focus && i === 0 ? { gridRow: '1 / -1' } : undefined} />
+      ))}
+    </span>
+  );
+}
 
 type Open = { what: ToolCat | 'layout'; top: number } | null;
 
@@ -116,8 +152,9 @@ export function ToolRail() {
         <Icon name={settings.sound ? 'soundOn' : 'soundOff'} />
       </button>
 
+      <AnimatePresence>
       {open && open.what !== 'layout' && (
-        <div className="flyout" style={{ top: Math.min(open.top, window.innerHeight - 320) }}>
+        <m.div key={open.what} className="flyout" style={{ top: Math.min(open.top, window.innerHeight - 320) }} {...flyout}>
           <div className="flyout-title">{CATS.find((c) => c.id === open.what)?.name}</div>
           {TOOLS.filter((t) => t.cat === open.what).map((t) => (
             <button
@@ -132,8 +169,9 @@ export function ToolRail() {
               {t.desc && <Icon name="info" size={14} className="flyout-info" />}
             </button>
           ))}
-        </div>
+        </m.div>
       )}
+      </AnimatePresence>
       {open && open.what !== 'layout' && tip && (
         <div className="tool-tip" style={{ top: Math.min(tip.top, window.innerHeight - 200) }} onMouseLeave={() => setTip(null)}>
           <div className="tool-tip-head">
@@ -148,35 +186,56 @@ export function ToolRail() {
           )}
         </div>
       )}
+      <AnimatePresence>
       {open?.what === 'layout' && (
-        <div className="flyout layout-pick" style={{ top: Math.min(open.top, window.innerHeight - 200) }}>
+        <m.div key="layout" className="flyout layout-pick" style={{ top: Math.min(open.top, window.innerHeight - 360) }} {...flyout}>
           <div className="flyout-title">Grafik bölmeleri</div>
           <div className="layout-grid">
             {LAYOUTS.map((k) => {
-              const [cols, rows] = GRID[k];
               return (
                 <button
                   key={k}
                   className="layout-opt"
                   aria-pressed={prefs.count === k}
                   title={`${k} grafik`}
-                  onClick={() => {
-                    S().setPrefs({ count: k });
-                    setOpen(null);
-                  }}
+                  onClick={() => S().setPrefs({ count: k })}
                 >
-                  <span className="mini" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }}>
-                    {Array.from({ length: k }, (_, i) => (
-                      <i key={i} />
-                    ))}
-                  </span>
+                  <Mini count={k} arrange={prefs.arrange ?? 'cols'} />
                   {k}
                 </button>
               );
             })}
           </div>
-        </div>
+          <div className="flyout-title">Yerleşim</div>
+          <div className="arrange-row" role="group" aria-label="Yerleşim">
+            {ARRANGE.map((a) => (
+              <button
+                key={a.id}
+                className="layout-opt"
+                aria-pressed={(prefs.arrange ?? 'cols') === a.id}
+                disabled={prefs.count < 2}
+                title={a.hint}
+                onClick={() => S().setPrefs({ arrange: a.id })}
+              >
+                <Mini count={Math.max(3, Math.min(prefs.count, 4))} arrange={a.id} />
+                {a.name}
+              </button>
+            ))}
+          </div>
+          <hr />
+          <button
+            className="flyout-item"
+            role="menuitemcheckbox"
+            aria-checked={prefs.syncCrosshair !== false}
+            title="Bir grafikte imleci gezdirince diğerleri aynı anı gösterir"
+            onClick={() => S().setPrefs({ syncCrosshair: prefs.syncCrosshair === false })}
+          >
+            <span className="tick">{prefs.syncCrosshair !== false && <Icon name="check" size={14} />}</span>
+            <span>İmleçleri eşitle</span>
+          </button>
+        </m.div>
       )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -159,6 +159,9 @@ const P: Record<string, JSX.Element> = {
       <path d="M10 9v5M10 6v.5" />
     </>
   ),
+  check: <path d="M4.25 10.25l3.75 3.75 7.75-8.25" />,
+  /** pane look: a framed chart with two candles */
+  frame: <path d="M2.75 3.75h14.5v12.5H2.75zM7.25 6.25v7.5M12.75 8.25v4M5.75 8.25h3v3.5h-3zM11.25 9.25h3v2h-3z" />,
   calendar: <path d="M2.75 4.75h14.5v12.5H2.75zM2.75 8.25h14.5M6.25 2.75v3.5M13.75 2.75v3.5" />,
 };
 

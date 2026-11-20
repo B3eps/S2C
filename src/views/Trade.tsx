@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { splitFor } from '../lib/programs';
 import { commissionFor } from '../lib/instruments';
 import { ReplayStrip } from '../components/ReplayStrip';
 import { activeInstrument, useApp, SPEEDS, ticketLots, riskOf, pnlOf, markPrice, spreadOf, accountLimits, countedDays, passBlocker, payoutBlocker, consistencyScore } from '../store';
 import { isParcaId } from '../lib/parcaVariants';
 import { ChartPanel } from '../components/ChartPanel';
-import { ToolRail, GRID } from '../components/ToolRail';
+import { ToolRail, paneGrid } from '../components/ToolRail';
+import { useAnimate } from 'motion/react';
+import { EASE_OUT } from '../lib/motion';
 import { CertLabel, CountUp, RuleGauges } from '../components/bits';
 import { Icon } from '../components/Icon';
 import { marketSession } from '../lib/calendar';
@@ -21,7 +23,17 @@ export function Trade() {
   const dockOpen = prefs.dockOpen !== false;
   const orderW = Math.max(260, Math.min(prefs.orderW ?? 304, 520));
   const dockH = Math.max(120, Math.min(prefs.dockH ?? 232, 520, Math.round(window.innerHeight * 0.5)));
-  const [cols, rows] = maxPane !== null && maxPane < prefs.count ? [1, 1] : GRID[prefs.count] ?? [1, 1];
+  const single = maxPane !== null && maxPane < prefs.count;
+  const grid = paneGrid(single ? 1 : prefs.count, prefs.arrange);
+  /** a new arrangement cross-fades in, so the jump of every pane reads as one change */
+  const layoutKey = single ? `max${maxPane}` : `${prefs.count}${prefs.arrange ?? 'cols'}`;
+  const [scope, animate] = useAnimate<HTMLDivElement>();
+  const seenLayout = useRef(layoutKey);
+  useEffect(() => {
+    if (seenLayout.current === layoutKey || !scope.current) return;
+    seenLayout.current = layoutKey;
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) animate(scope.current, { opacity: [0.4, 1] }, { duration: 0.22, ease: EASE_OUT });
+  }, [layoutKey, animate, scope]);
 
   // Space reveals the next bar
   useEffect(() => {
@@ -42,9 +54,9 @@ export function Trade() {
       <TopBar />
       <div className="trade-body" style={{ gridTemplateColumns: `48px minmax(0, 1fr) ${orderOpen ? orderW + 'px' : '28px'}` }}>
         <ToolRail />
-        <div className="charts grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))` }}>
+        <div ref={scope} className="charts grid" style={{ gridTemplateColumns: grid.cols, gridTemplateRows: grid.rows }}>
           {Array.from({ length: prefs.count }, (_, i) => (
-            <div key={i} className="chart-slot" hidden={maxPane !== null && maxPane < prefs.count && maxPane !== i}>
+            <div key={i} className="chart-slot" hidden={single && maxPane !== i} style={grid.focus && i === 0 ? { gridRow: '1 / -1' } : undefined}>
               <ChartPanel index={i} />
             </div>
           ))}
@@ -138,7 +150,7 @@ function TopBar() {
       </div>
       <div className="clock" title="Tarih gizli. Saat UTC.">
         <Icon name="clock" size={16} />
-        <span>{ms.name}</span>
+        <span className="clock-session">{ms.name}</span>
         <b>{clockUtc(live.clock - 60_000)}</b>
       </div>
       {confirm ? (
@@ -151,8 +163,8 @@ function TopBar() {
           </button>
         </div>
       ) : (
-        <button className="btn" title="Seansı mevcut fiyatla kapatır; gün sonuna ilerlemek için alttaki düğmeyi kullan." onClick={() => setConfirm(true)}>
-          <Icon name="flag" size={16} /> Seansı bitir
+        <button className="btn" aria-label="Seansı bitir" title="Seansı mevcut fiyatla kapatır; gün sonuna ilerlemek için alttaki düğmeyi kullan." onClick={() => setConfirm(true)}>
+          <Icon name="flag" size={16} /> <span className="btn-label">Seansı bitir</span>
         </button>
       )}
     </div>
@@ -571,14 +583,14 @@ function Dock() {
         <button className={`play ${playing ? 'on' : ''}`} title={playing ? 'Duraklat' : 'Oynat'} disabled={seekingSignal} onClick={() => S().setPlaying(!playing)}>
           <Icon name={playing ? 'pause' : 'play'} size={16} />
         </button>
-        <button className="btn sm" onClick={() => S().stepBar()} disabled={playing || seekingSignal} title="Sonraki mum (Boşluk)">
-          <Icon name="step" size={14} /> Sonraki mum <span className="kbd">Boşluk</span>
+        <button className="btn sm" onClick={() => S().stepBar()} disabled={playing || seekingSignal} title="Sonraki mum (Boşluk)" aria-label="Sonraki mum">
+          <Icon name="step" size={14} /> <span className="lbl-long">Sonraki mum</span> <span className="kbd">Boşluk</span>
         </button>
-        <button className="btn sm" onClick={() => void S().advanceToDayEnd()} disabled={playing || seekingSignal || dataWait} title="22:00 UTC'ye kadar tüm mumları, emirleri ve risk kurallarını sırayla işler. Açık pozisyonlar korunur.">
-          Gün sonuna ilerle
+        <button className="btn sm" aria-label="Gün sonuna ilerle" onClick={() => void S().advanceToDayEnd()} disabled={playing || seekingSignal || dataWait} title="22:00 UTC'ye kadar tüm mumları, emirleri ve risk kurallarını sırayla işler. Açık pozisyonlar korunur.">
+          <span className="lbl-long">Gün sonuna ilerle</span><span className="lbl-short">Gün sonu</span>
         </button>
-        <button className="btn sm" onClick={() => seekingSignal ? S().stopSignalSeek() : void S().advanceToNextSignal()} disabled={!seekingSignal && (playing || dataWait || !hasSetup)} title={seekingSignal ? 'Sinyal aramasını durdur' : 'Klasik veya Gold sinyaline kadar mumları işler ve tam sinyalde durur'}>
-          {seekingSignal ? 'Aramayı durdur' : 'Sinyale ilerle'}
+        <button className="btn sm" aria-label={seekingSignal ? 'Aramayı durdur' : 'Sinyale ilerle'} onClick={() => seekingSignal ? S().stopSignalSeek() : void S().advanceToNextSignal()} disabled={!seekingSignal && (playing || dataWait || !hasSetup)} title={seekingSignal ? 'Sinyal aramasını durdur' : 'Klasik veya Gold sinyaline kadar mumları işler ve tam sinyalde durur'}>
+          {seekingSignal ? 'Aramayı durdur' : <><span className="lbl-long">Sinyale ilerle</span><span className="lbl-short">Sinyal</span></>}
         </button>
         <div className="seg" role="group" aria-label="Hız" style={{ marginLeft: 8 }}>
           {SPEEDS.map((sp, i) => (oneMinute && sp > 4 ? null :

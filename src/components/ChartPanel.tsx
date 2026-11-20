@@ -7,6 +7,9 @@ import { TOOL_BY_KIND, defaultStop } from '../lib/drawings';
 import { drawingShapes, hitShapes, Shape, Handle, SceneEnv } from '../lib/drawingScene';
 import { OverlayPrimitive } from '../lib/overlayPrimitive';
 import { instrumentOf } from '../lib/instruments';
+import { AnimatePresence, m } from 'motion/react';
+import { popover } from '../lib/motion';
+import type { PaneView } from '../store';
 import type { SetupMark } from '../lib/parcaSetup';
 import { IND_BY_ID, ActiveInd } from '../lib/indicators';
 import { createSetupEngine, SetupResult } from '../lib/parcaSetup';
@@ -39,6 +42,56 @@ interface OLine {
 
 /** last copied drawing, shared between panes (Ctrl+C / Ctrl+V / Ctrl+D) */
 let drawingClip: Drawing | null = null;
+
+/** Crosshair shared between panes: the moment under the pointer in one pane, or null when it leaves. */
+type CrossEvent = { from: number; t: number; price: number } | { from: number; t: null };
+const crossListeners = new Set<(e: CrossEvent) => void>();
+const emitCross = (e: CrossEvent) => crossListeners.forEach((l) => l(e));
+
+const VIEW_ROWS: { key: keyof PaneView; label: string; hint: string; standard: boolean }[] = [
+  { key: 'hollow', label: 'İçi boş yükselen mum', hint: 'Yükselen mumlar yalnız çerçeveyle çizilir', standard: false },
+  { key: 'bands', label: 'Seans bantları', hint: 'Asya, Londra ve New York arka planları', standard: true },
+  { key: 'grid', label: 'Izgara', hint: 'Yatay ve dikey yardımcı çizgiler', standard: true },
+  { key: 'log', label: 'Logaritmik ölçek', hint: 'Yüzde hareketleri eşit boyda görünür; kriptoda uzun aralıklar için', standard: false },
+  { key: 'follow', label: 'Son mumu takip et', hint: 'Replay ilerledikçe grafik yeni mumla kayar', standard: true },
+];
+
+/** The look of one pane. Each row is a toggle; the checkmark shows what is on. */
+function PaneViewMenu({ view, at, onChange, onClose }: { view: PaneView; at: { x: number; y: number }; onChange: (v: PaneView) => void; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const away = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node) && !(e.target as HTMLElement).closest('.pane-view-btn')) onClose();
+    };
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('mousedown', away);
+    window.addEventListener('keydown', esc);
+    return () => {
+      window.removeEventListener('mousedown', away);
+      window.removeEventListener('keydown', esc);
+    };
+  }, [onClose]);
+  const changed = VIEW_ROWS.some((r) => (view[r.key] ?? r.standard) !== r.standard);
+  return (
+    <m.div ref={ref} className="pane-view-menu" role="menu" aria-label="Grafik görünümü" style={{ left: at.x, top: at.y, transformOrigin: 'top left' }} {...popover}>
+      <div className="flyout-title">Grafik görünümü</div>
+      {VIEW_ROWS.map((r) => {
+        const on = view[r.key] ?? r.standard;
+        return (
+          <button key={r.key} className="flyout-item" role="menuitemcheckbox" aria-checked={on} title={r.hint} onClick={() => onChange({ ...view, [r.key]: !on })}>
+            <span className="tick">{on && <Icon name="check" size={14} />}</span>
+            <span>{r.label}</span>
+          </button>
+        );
+      })}
+      <hr />
+      <button className="flyout-item" disabled={!changed} onClick={() => onChange({})}>
+        <span className="tick" />
+        <span>Varsayılana dön</span>
+      </button>
+    </m.div>
+  );
+}
 
 type LiveSetup = { id: ParcaId; side: 'long' | 'short'; entry: number; stop: number; target: number; strong: boolean; t: number; rr: number; liqR?: number };
 /** Everything the canvas overlay paints, refreshed on every React render. */
@@ -245,6 +298,7 @@ export function ChartPanel({ index }: { index: number }) {
   const setupMemo = useRef(new Map<string, { engineKey: string; engine: ReturnType<typeof createSetupEngine>; key: string; result: SetupResult }>());
   const [values, setValues] = useState<Record<string, Record<string, number>>>({});
   const [picker, setPicker] = useState(false);
+  const [viewMenu, setViewMenu] = useState<{ x: number; y: number } | null>(null);
   const [editing, setEditing] = useState<{ uid: string; x: number; y: number } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; price: number } | null>(null);
   const [fx, setFx] = useState<(Fx & { id: string; x: number; y: number })[]>([]);
@@ -333,6 +387,43 @@ export function ChartPanel({ index }: { index: number }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // pane look
+  const viewKey = JSON.stringify(pane.view ?? {});
+  useEffect(() => {
+    ctrlRef.current?.applyView(pane.view);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewKey]);
+
+  // crosshair: this pane reports the pointer's moment, the others show it
+  useEffect(() => {
+    const ctrl = ctrlRef.current;
+    if (!ctrl) return;
+    const onMove = (p: { time?: unknown; point?: { x: number; y: number }; sourceEvent?: unknown }) => {
+      if (!p.sourceEvent || useApp.getState().prefs.syncCrosshair === false) return;
+      const price = p.point ? ctrl.yToPrice(p.point.y) : null;
+      if (typeof p.time === 'number' && price != null) emitCross({ from: index, t: p.time * 1000, price });
+      else emitCross({ from: index, t: null });
+    };
+    const onOther = (e: CrossEvent) => {
+      if (e.from === index) return;
+      if (e.t === null || useApp.getState().prefs.syncCrosshair === false) return ctrl.chart.clearCrosshairPosition();
+      const t = ctrl.bucket(e.t);
+      const last = ctrl.bars[ctrl.bars.length - 1];
+      if (!last || (t as number) * 1000 > last.t || (t as number) * 1000 < ctrl.bars[0].t) return ctrl.chart.clearCrosshairPosition();
+      ctrl.chart.setCrosshairPosition(e.price, t, ctrl.candles);
+    };
+    const host = hostRef.current!;
+    const leave = () => emitCross({ from: index, t: null });
+    ctrl.chart.subscribeCrosshairMove(onMove);
+    crossListeners.add(onOther);
+    host.addEventListener('pointerleave', leave);
+    return () => {
+      ctrl.chart.unsubscribeCrosshairMove(onMove);
+      crossListeners.delete(onOther);
+      host.removeEventListener('pointerleave', leave);
+    };
+  }, [index]);
 
   // market data
   useEffect(() => {
@@ -725,9 +816,20 @@ export function ChartPanel({ index }: { index: number }) {
             </button>
           ))}
         </div>
-        <button className="btn sm ghost" onClick={() => setPicker(true)}>
-          <Icon name="wave" size={16} /> İndikatör
+        <button className="btn sm ghost" aria-label="İndikatör" title="İndikatör ekle veya düzenle" onClick={() => setPicker(true)}>
+          <Icon name="wave" size={16} /> <span className="btn-label">İndikatör</span>
         </button>
+        <span className="pane-view-anchor">
+          <button className="icon-btn sm pane-view-btn" title="Grafik görünümü" aria-expanded={!!viewMenu} aria-haspopup="menu" onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            setViewMenu((v) => (v ? null : { x: Math.min(r.left, window.innerWidth - 268), y: r.bottom + 6 }));
+          }}>
+            <Icon name="frame" size={16} />
+          </button>
+          <AnimatePresence>
+            {viewMenu && <PaneViewMenu view={pane.view ?? {}} at={viewMenu} onChange={(v) => setPane(index, { view: v })} onClose={() => setViewMenu(null)} />}
+          </AnimatePresence>
+        </span>
         {multi && (
           <button
             className="icon-btn sm head-end"

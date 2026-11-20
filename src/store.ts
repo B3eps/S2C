@@ -113,9 +113,26 @@ export interface ChartPrefs {
   /** bottom dock: height in px, and whether it is folded to its replay bar */
   dockH?: number;
   dockOpen?: boolean;
+  /** how 2+ panes share the space: side by side, stacked, or one large pane beside the rest */
+  arrange?: 'cols' | 'rows' | 'focus';
+  /** the crosshair of one pane shows the same moment on the others */
+  syncCrosshair?: boolean;
   /** right order panel */
   orderOpen?: boolean;
   orderW?: number;
+}
+
+export interface PaneView {
+  /** rising candles drawn as outlines */
+  hollow?: boolean;
+  /** Asia / London / New York background bands (default on) */
+  bands?: boolean;
+  /** grid lines (default on) */
+  grid?: boolean;
+  /** logarithmic price scale */
+  log?: boolean;
+  /** keep the newest candle in view as the replay advances (default on) */
+  follow?: boolean;
 }
 
 export const SPEEDS = [0.5, 1, 2, 4, 8, 16, 32];
@@ -124,6 +141,8 @@ export const LAYOUTS = [1, 2, 3, 4, 6, 8];
 export interface PaneCfg {
   tf: TF;
   ind: ActiveInd[];
+  /** look of this pane; every field defaults to the app's standard */
+  view?: PaneView;
 }
 const PANE_TFS: TF[] = ['5m', '1h', '15m', '4h', '1m', '5m', '15m', '1h'];
 const parcaIndicator = (): ActiveInd => ({ uid: uid(), id: PARCA_CLASSIC_ID, params: { pivot: 2, window: 10, zoneAge: 80 }, colors: ['#c9a96e'] });

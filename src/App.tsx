@@ -1,4 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
+import { AnimatePresence, m } from 'motion/react';
+import { toast as toastMotion } from './lib/motion';
 import { useApp, View } from './store';
 import { Emblem } from './components/Emblem';
 import { Icon, IconName } from './components/Icon';
@@ -65,12 +67,14 @@ export function App() {
       </main>
       <Overlays />
       <Notices />
-      {toast && (
-        <div className={`toast ${toast.tone}`} role="status">
-          {toast.tone !== 'neutral' && <Icon name="warn" size={16} />}
-          {toast.text}
-        </div>
-      )}
+      <AnimatePresence>
+        {toast && (
+          <m.div key={toast.text} className={`toast ${toast.tone}`} role="status" {...toastMotion}>
+            {toast.tone !== 'neutral' && <Icon name="warn" size={16} />}
+            {toast.text}
+          </m.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

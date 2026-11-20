@@ -34,6 +34,7 @@ Satır sayıları Kasım 2026 çalışma kopyası. Bir dosyayı açmadan önce b
 | `stats.ts` | Özet metrikler, ısı haritası ızgarası. |
 | `sound.ts` | Web Audio ile sentezlenen sesler (dosya yok). |
 | `theme.ts` | Grafik renkleri; `styles/tokens.css` ile **eşit tutulmalı**. |
+| `motion.ts` | Motion ön ayarları (`popover`, `flyout`, `toast`, `EASE_OUT`); tokens.css süreleriyle eş. |
 | `format.ts` | Para, %, R, lot, tarih biçimleri (Türkçe). |
 
 ## `src/components/`

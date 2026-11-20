@@ -19,7 +19,8 @@ Gerçek altın grafiği geçmişten rastgele bir anda açılır. Fiyat ve tarih 
   - Gün şeridi: prop gününü (22:00 → 22:00 UTC) seans bantları, haberler ve işlemlerinle gösterir. İleride bir ana tıklayınca oraya kadar her mum, emir ve kural sırayla işlenir; geri sarma yoktur. Habere tıklamak bir dakika öncesinde durdurur.
   - Çizimler grafiğin kendi tuvaline çizilir: kaydırma ve yakınlaştırmada mumlarla aynı karede hareket eder, ekran görüntülerinde de görünür.
   - Gizli fiyat tek tıkla açılabilir.
-  - 1–8 grafik bölmesi, 5 zaman dilimi.
+  - 1–8 grafik bölmesi, 5 zaman dilimi. Bölmeler yan yana, üst üste ya da "odak" (büyük ana grafik, yanında küçükler) dizilir. İmleç eşitleme açıkken bir grafikteki an diğerlerinde de gösterilir.
+  - Her grafiğin görünüm menüsü: içi boş yükselen mum, seans bantları, ızgara, logaritmik ölçek, son mumu takip.
   - Eksenleri sürükleyerek yakınlaştırma.
 - **Emirler**
   - Piyasa, limit ve stop emirleri.

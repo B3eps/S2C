@@ -20,7 +20,8 @@ body {
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
-  min-width: 1200px;
+  /* desktop only, but Windows laptops at 125–150 % scaling report ~1100 CSS px */
+  min-width: 960px;
 }
 ::selection {
   background: rgba(217, 178, 92, 0.35);
@@ -883,6 +884,8 @@ table.tbl {
 /* ── trade screen ──────────────────────────────────────────────────────── */
 .trade {
   display: grid;
+  /* without an explicit track the top bar's min-content width widened the whole screen */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 56px 1fr 232px;
   height: 100%;
 }
@@ -1736,7 +1739,6 @@ table.tbl {
   align-items: center;
   gap: var(--s-2);
   box-shadow: var(--shadow-2);
-  animation: rise var(--d-2) var(--ease-out);
 }
 .toast.warn {
   border-color: rgba(240, 162, 75, 0.5);
@@ -2299,7 +2301,6 @@ table.tbl {
   border-radius: var(--r-3);
   box-shadow: var(--shadow-2);
   padding: 4px;
-  animation: pop var(--d-1) var(--ease-out);
 }
 .flyout-title {
   padding: 8px 10px 6px;
@@ -2605,3 +2606,65 @@ input[type='date']:placeholder-shown {
 }
 .strip-ghost.flip b { left: -5px; transform: translate(-100%, -50%); }
 .strip-ghost.past b { background: transparent; color: var(--ink-3); }
+
+/* ── narrow desktop (≤1280 px): the top bar gives up width before the charts do ── */
+@media (max-width: 1280px) {
+  .topbar { gap: var(--s-3); padding: 0 var(--s-3); }
+  .topbar .figures { gap: var(--s-3); }
+  .topbar .gauges { grid-template-columns: repeat(3, minmax(88px, 150px)); gap: var(--s-3); }
+  .topbar .clock { padding-left: var(--s-3); }
+  .topbar .clock .clock-session { display: none; }
+}
+@media (max-width: 1120px) {
+  .topbar .btn .btn-label { display: none; }
+  .topbar .gauges { grid-template-columns: repeat(3, minmax(72px, 120px)); }
+}
+
+/* a chart pane narrower than its header: labels fold into their icons */
+.chart-panel { container-type: inline-size; }
+@container (max-width: 560px) {
+  .chart-head .btn-label { display: none; }
+  .chart-head { gap: var(--s-2); }
+}
+
+/* ── pane look menu and layout flyout ─────────────────────────────────────── */
+.pane-view-anchor { display: inline-flex; flex: none; }
+.pane-view-btn[aria-expanded='true'] { background: var(--ply-3); color: var(--ink-1); }
+.pane-view-menu {
+  position: fixed; z-index: 55; width: 260px; padding: 4px;
+  background: var(--ply-2); border: 1px solid var(--rule-strong); border-radius: var(--r-3);
+  box-shadow: var(--shadow-2);
+}
+.pane-view-menu hr, .layout-pick hr { border: 0; border-top: 1px solid var(--rule); margin: 4px 2px; }
+.flyout-item .tick {
+  flex: none; width: 16px; height: 16px; display: grid; place-items: center;
+  border: 1px solid var(--rule-strong); border-radius: var(--r-1); color: var(--ink-1);
+}
+.flyout-item[aria-checked='true'] .tick { background: var(--ply-3); border-color: var(--ink-3); }
+.flyout-item:disabled { color: var(--ink-3); cursor: default; background: transparent; }
+.flyout-item:disabled .tick { border-color: transparent; }
+.flyout-item:focus-visible, .layout-opt:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
+.layout-pick { width: 264px; }
+.arrange-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 0 4px 4px; }
+.arrange-row .layout-opt { font-size: var(--t-11); }
+.layout-opt:disabled { opacity: 0.4; cursor: default; }
+@media (max-width: 1280px) {
+  /* gauge name above its value: both stay readable in a narrow column */
+  .topbar .gauge { gap: 3px; }
+  .topbar .gauge-top { display: grid; gap: 0; font-size: var(--t-11); line-height: 1.25; }
+  .topbar .gauge-top .val { text-align: left; }
+  .replay-bar .kbd { display: none; }
+  .replay-bar .tabs { margin-left: var(--s-3); }
+  .replay-bar { gap: var(--s-1); }
+}
+@media (max-width: 1120px) {
+  .replay-bar .tabs .tab { padding-inline: var(--s-2); }
+}
+/* the dock, like .trade, must not take its width from the replay bar's content */
+.dock { grid-template-columns: minmax(0, 1fr); }
+.replay-bar { min-width: 0; overflow: hidden; }
+.lbl-short { display: none; }
+@media (max-width: 1280px) {
+  .replay-bar .lbl-long { display: none; }
+  .replay-bar .lbl-short { display: inline; }
+}
